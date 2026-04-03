@@ -16,9 +16,8 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                // Software X-Flip to exactly cancel the printer's hardware mirror defect
-                let mirroredX = width - 1 - x
-                let pixel = rawData[y * width + mirroredX]
+                // Raw test proved hardware does NOT mirror. Read naturally Left-to-Right.
+                let pixel = rawData[y * width + x]
                 if pixel < 128 { 
                     b |= (1 << (7 - bit))
                 }
@@ -58,7 +57,6 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        // Pass 1: Render exact PDF as Preview would show it
         let testWidth = 576
         let testScale = CGFloat(testWidth) / pdfWidth
         let testHeight = Int(pdfHeight * testScale)
@@ -76,17 +74,14 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: testScale, y: -testScale)
-        
-        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        testContext.translateBy(x: -box.midX, y: -box.midY)
-        
+        // Render PDF EXACTLY as preview shows it
+        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
+        testContext.concatenate(transform)
         testContext.drawPDFPage(page)
+        
         guard let testImage = testContext.makeImage() else { continue }
         
-        // Find non-white pixel bounds (Auto-Crop)
+        // Find non-white pixel bounds. testData is Y-UP (bottom-left origin)
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
@@ -106,12 +101,16 @@ func main() {
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
-            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+            
+            // Convert Y-UP bounds to Top-Left origin for CGImage.cropping
+            let invertedMinY = testHeight - 1 - maxY
+            let invertedMaxY = testHeight - 1 - minY
+            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Pass 2: Layout cropped image for printer
+        // Layout cropped image for printer
         let isLandscape = croppedImage.width > croppedImage.height
         let targetWidth = 576
         
@@ -135,13 +134,12 @@ func main() {
         
         finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        // Only flip Y here to ensure visual top-down rendering in finalData.
-        // We DO NOT flip X here because we already flip X in the byte packaging step!
-        // Flipping X twice was causing the mirror image and reversed rotation.
+        // Make finalContext Y-DOWN so y=0 is the visual Top of the image
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
         if isLandscape {
-            // Rotate +90 degrees (Clockwise in this coordinate system)
+            // +90 Clockwise in Y-DOWN puts the Top edge of the text on the Right edge (Sticky side)
+            // Reads perfectly Top-to-Bottom.
             finalContext.rotate(by: CGFloat.pi / 2.0)
         }
         
