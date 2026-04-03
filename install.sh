@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SDK_PATH="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+MODULE_CACHE_PATH="/tmp/nemonic-clang-module-cache"
 
 echo "Nemonic MIP-201W Native macOS Driver Installer"
 echo "=============================================="
@@ -12,7 +14,8 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "1. Compiling Swift driver (Apple Silicon Native)..."
-swiftc "$DIR/pdftonemonic.swift" -o "$DIR/pdftonemonic" -O
+mkdir -p "$MODULE_CACHE_PATH"
+CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH" swiftc -sdk "$SDK_PATH" "$DIR/pdftonemonic.swift" -o "$DIR/pdftonemonic" -O
 
 echo "2. Installing CUPS filter to /Library/Printers/Nemonic..."
 mkdir -p /Library/Printers/Nemonic
