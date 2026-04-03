@@ -12,16 +12,11 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
     out.append(contentsOf: [UInt8(height & 0xFF), UInt8((height >> 8) & 0xFF)])
     
     for y in 0..<height {
-        // ULTIMATE Y-FLIP FIX: 
-        // We decouple the memory layout from Apple's CoreGraphics quirks by reading the array top-to-bottom visually, 
-        // instead of forcing CoreGraphics into a Y-DOWN context (which silently mirrors and flips drawn images).
-        let visualY = height - 1 - y
-        
         for xB in 0..<wBytes {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                let pixel = rawData[visualY * width + x]
+                let pixel = rawData[y * width + x]
                 if pixel < 128 { 
                     b |= (1 << (7 - bit))
                 }
@@ -61,14 +56,13 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        let dpiScale: CGFloat = 203.0 / 72.0 
-        let testWidth = Int(pdfWidth * dpiScale)
-        let testHeight = Int(pdfHeight * dpiScale)
+        // Pass 1: Render exact PDF as Preview would show it
+        let testWidth = 576
+        let testScale = CGFloat(testWidth) / pdfWidth
+        let testHeight = Int(pdfHeight * testScale)
         
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
-        
-        // PURE Y-UP Cartesian Context
         guard let testContext = CGContext(data: &testData,
                                           width: testWidth,
                                           height: testHeight,
@@ -80,12 +74,17 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
-        testContext.concatenate(transform)
-        testContext.drawPDFPage(page)
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: testScale, y: -testScale)
         
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
+        
+        testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         
+        // Find non-white pixel bounds (Auto-Crop)
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
@@ -106,32 +105,36 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            // In a Y-UP buffer, maxY is the visual Top of the page.
-            // Convert to Top-Left origin coordinates for CGImage.cropping:
             let invertedMinY = testHeight - 1 - maxY
-            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: maxY - minY + 1)
+            let invertedMaxY = testHeight - 1 - minY
+            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
+        // Pass 2: Layout cropped image for printer
         let targetWidth = 576
-        let rightMargin = 24 
+        
+        // Use 12 dots (~1.5mm) margin to push text away from sticky edge
+        let rightMargin = 12
         let printableWidth = targetWidth - rightMargin
         
-        let contentRollWidth = croppedImage.height
-        let contentRollLength = croppedImage.width
+        let contentWidth = croppedImage.height
+        let contentHeight = croppedImage.width
         
-        var finalScale: CGFloat = 1.0
-        if contentRollWidth > printableWidth {
-            finalScale = CGFloat(printableWidth) / CGFloat(contentRollWidth)
+        var finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
+        
+        // ONLY CHANGE FROM THE "WORKED PERFECTLY" SCRIPT:
+        // Cap the maximum scale multiplier so short lines don't get blown up into 160mm giant banners.
+        if finalScale > 2.0 {
+            finalScale = 2.0
         }
         
-        let feedPadding = 60
-        let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
+        // ADDED: 40 dots (~5mm) feed padding so the printer blade cuts blank paper, not the edge of the text.
+        let feedPadding = 40
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPadding
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
-        
-        // PURE Y-UP Cartesian Context
         guard let finalContext = CGContext(data: &finalData,
                                            width: targetWidth,
                                            height: targetHeight,
@@ -143,10 +146,11 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
+        // Translate to center of PRINTABLE area
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        // Rotate -90 degrees (Clockwise in standard Y-UP Cartesian math)
-        finalContext.rotate(by: -CGFloat.pi / 2.0)
+        finalContext.scaleBy(x: 1.0, y: -1.0)
+        finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
