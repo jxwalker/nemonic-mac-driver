@@ -50,10 +50,15 @@ func main() {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
         
         let box = page.getBoxRect(.mediaBox)
-        let dpiScale: CGFloat = 203.0 / 72.0 
+        let rotation = page.rotationAngle
+        let isRotated = (rotation % 180 != 0)
         
-        let testWidth = Int(box.width * dpiScale)
-        let testHeight = Int(box.height * dpiScale)
+        let pdfWidth = isRotated ? box.height : box.width
+        let pdfHeight = isRotated ? box.width : box.height
+        
+        let testWidth = 576
+        let testScale = CGFloat(testWidth) / pdfWidth
+        let testHeight = Int(pdfHeight * testScale)
         
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
@@ -68,11 +73,14 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        // PURE Y-UP RENDER (This guarantees CGContextDrawPDFPage draws completely upright and normal)
-        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
-        testContext.concatenate(transform)
-        testContext.drawPDFPage(page)
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: testScale, y: -testScale)
         
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
+        
+        testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
@@ -95,31 +103,28 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            // In Y-UP, maxY is the top of the text. CGImage.cropping uses Top-Left origin.
-            let cropY = testHeight - 1 - maxY
-            cropRect = CGRect(x: minX, y: cropY, width: maxX - minX + 1, height: maxY - minY + 1)
+            let invertedMinY = testHeight - 1 - maxY
+            let invertedMaxY = testHeight - 1 - minY
+            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
         let targetWidth = 576
-        let rightMargin = 24 // 3mm margin from sticky edge
+        let rightMargin = 12 
         let printableWidth = targetWidth - rightMargin
         
+        // ALIGNMENT FIX: All print jobs are rotated 90 degrees Anti-Clockwise (-pi/2) 
+        // to perfectly match the user's preferred reading orientation.
         let contentRollWidth = croppedImage.height
         let contentRollLength = croppedImage.width
         
-        // Slightly smarter scaling: Scale up to 2x max to ensure readability without giant text
         var finalScale: CGFloat = 1.0
         if contentRollWidth > printableWidth {
             finalScale = CGFloat(printableWidth) / CGFloat(contentRollWidth)
-        } else {
-            // Upscale slightly if it's very small, but cap at 2.0 to avoid "giant" text
-            finalScale = min(2.0, CGFloat(printableWidth) / CGFloat(contentRollWidth))
         }
         
-        let feedPadding = 40
-        let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
+        let targetHeight = Int(CGFloat(contentRollLength) * finalScale)
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -133,14 +138,11 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        // Center the text within the printable area (pushes it safely away from the sticky edge)
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
-        
-        // Make context Y-DOWN so it feeds Top-to-Bottom
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
-        // Rotate +90 Clockwise so Top of text maps to Right edge (Sticky edge)
-        finalContext.rotate(by: CGFloat.pi / 2.0)
+        // UNCONDITIONAL -90 DEGREE ROTATION (Anti-Clockwise in Y-DOWN)
+        finalContext.rotate(by: -CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
