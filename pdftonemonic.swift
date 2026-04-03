@@ -105,9 +105,8 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            let invertedMinY = testHeight - 1 - maxY
-            let invertedMaxY = testHeight - 1 - minY
-            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
+            // CGImage.cropping uses y=0 at top-left (same as bitmap row order), no Y-inversion needed
+            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
