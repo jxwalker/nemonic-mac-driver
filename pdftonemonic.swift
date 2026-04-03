@@ -140,11 +140,14 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
 
-        // Draw content rotated 90° CW: translate to center, flip Y, rotate π/2 (CCW in
-        // math coords → CW in screen coords after the Y flip), then draw centered.
+        // Draw content rotated 90° CW. Raster-right = physical top (sticky strip).
+        // Align content to the sticky edge with a small gap rather than centering,
+        // so margins appear at the bottom of the label (away from sticky), not both sides.
         let drawWidth  = CGFloat(contentWidth)  * finalScale
         let drawHeight = CGFloat(contentHeight) * finalScale
-        finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
+        let stickyGap: CGFloat = 12  // ~1.5mm gap from sticky strip edge
+        let xPos = CGFloat(targetWidth) - (drawHeight / 2.0) - stickyGap
+        finalContext.translateBy(x: xPos, y: CGFloat(targetHeight) / 2.0)
         finalContext.scaleBy(x: 1.0, y: -1.0)
         finalContext.rotate(by: .pi / 2.0)
         finalContext.draw(croppedImage, in: CGRect(x: -drawWidth / 2.0, y: -drawHeight / 2.0, width: drawWidth, height: drawHeight))
