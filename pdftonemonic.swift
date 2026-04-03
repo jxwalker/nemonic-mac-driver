@@ -122,10 +122,10 @@ func main() {
         let contentHeight = croppedImage.height
 
         // Rotate 90° CW so the sticky strip (trailing/right edge) ends up at the top when
-        // the label is held Post-it style. After rotation, contentHeight spans the print
-        // width and contentWidth becomes the feed-direction length.
-        var finalScale = CGFloat(printableWidth) / CGFloat(contentHeight)
-        if finalScale > 3.0 { finalScale = 3.0 }  // cap: avoid absurdly long labels for very short content
+        // the label is held Post-it style. Scale by the larger dimension so the biggest
+        // axis of the content fills the print width — preserves natural text size for both
+        // portrait and landscape PDFs.
+        let finalScale = CGFloat(printableWidth) / CGFloat(max(contentWidth, contentHeight))
         let targetHeight = Int(CGFloat(contentWidth) * finalScale)
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
