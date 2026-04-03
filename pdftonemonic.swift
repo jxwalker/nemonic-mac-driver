@@ -111,11 +111,9 @@ func main() {
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
         let targetWidth = 576
-        let rightMargin = 12 
+        let rightMargin = 24 // ~3mm padding from sticky edge
         let printableWidth = targetWidth - rightMargin
         
-        // ALIGNMENT FIX: All print jobs are rotated 90 degrees Anti-Clockwise (-pi/2) 
-        // to perfectly match the user's preferred reading orientation.
         let contentRollWidth = croppedImage.height
         let contentRollLength = croppedImage.width
         
@@ -124,7 +122,9 @@ func main() {
             finalScale = CGFloat(printableWidth) / CGFloat(contentRollWidth)
         }
         
-        let targetHeight = Int(CGFloat(contentRollLength) * finalScale)
+        // ADDED: 60 dots (~7.5mm) of feed padding so the printer blade never chops the text
+        let feedPadding = 60
+        let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -141,8 +141,11 @@ func main() {
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
-        // UNCONDITIONAL -90 DEGREE ROTATION (Anti-Clockwise in Y-DOWN)
-        finalContext.rotate(by: -CGFloat.pi / 2.0)
+        // FIXED: +90 degrees Clockwise.
+        // This moves the Top of the text to the Leading Edge (printed first, far away from the blade)
+        // and Ascenders to the Right Edge (Sticky side). 
+        // Perfect Top-to-Bottom reading.
+        finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
