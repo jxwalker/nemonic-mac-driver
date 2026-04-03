@@ -12,11 +12,16 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
     out.append(contentsOf: [UInt8(height & 0xFF), UInt8((height >> 8) & 0xFF)])
     
     for y in 0..<height {
+        // ULTIMATE Y-FLIP FIX: 
+        // We decouple the memory layout from Apple's CoreGraphics quirks by reading the array top-to-bottom visually, 
+        // instead of forcing CoreGraphics into a Y-DOWN context (which silently mirrors and flips drawn images).
+        let visualY = height - 1 - y
+        
         for xB in 0..<wBytes {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                let pixel = rawData[y * width + x]
+                let pixel = rawData[visualY * width + x]
                 if pixel < 128 { 
                     b |= (1 << (7 - bit))
                 }
@@ -62,6 +67,8 @@ func main() {
         
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
+        
+        // PURE Y-UP Cartesian Context
         guard let testContext = CGContext(data: &testData,
                                           width: testWidth,
                                           height: testHeight,
@@ -99,7 +106,10 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+            // In a Y-UP buffer, maxY is the visual Top of the page.
+            // Convert to Top-Left origin coordinates for CGImage.cropping:
+            let invertedMinY = testHeight - 1 - maxY
+            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
@@ -108,11 +118,6 @@ func main() {
         let rightMargin = 24 
         let printableWidth = targetWidth - rightMargin
         
-        // UNCONDITIONAL ROTATION:
-        // The user holds the paper with sticky on the right, reading top-to-bottom.
-        // The printer physical roll is 80mm wide.
-        // Therefore, ALL jobs must be rotated 90 degrees Clockwise to map the document's width 
-        // to the infinite feed roll, and the document's height to the 80mm print head.
         let contentRollWidth = croppedImage.height
         let contentRollLength = croppedImage.width
         
@@ -125,6 +130,8 @@ func main() {
         let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
+        
+        // PURE Y-UP Cartesian Context
         guard let finalContext = CGContext(data: &finalData,
                                            width: targetWidth,
                                            height: targetHeight,
@@ -138,10 +145,8 @@ func main() {
         
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        finalContext.scaleBy(x: 1.0, y: -1.0)
-        
-        // UNCONDITIONAL 90 DEGREE CLOCKWISE ROTATION
-        finalContext.rotate(by: CGFloat.pi / 2.0)
+        // Rotate -90 degrees (Clockwise in standard Y-UP Cartesian math)
+        finalContext.rotate(by: -CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
