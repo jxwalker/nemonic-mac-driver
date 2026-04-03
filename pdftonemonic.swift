@@ -99,30 +99,30 @@ func main() {
         
         var cropRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
         if minX <= maxX && minY <= maxY {
-            // Tight crop - we apply the true physical margins in Pass 2
-            let padding = 0
+            let padding = 16
             minX = max(0, minX - padding)
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
-            cropRect = CGRect(x: minX, y: testHeight - 1 - maxY, width: maxX - minX + 1, height: maxY - minY + 1)
+            
+            let invertedMinY = testHeight - 1 - maxY
+            let invertedMaxY = testHeight - 1 - minY
+            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Pass 2: Layout cropped image for printer with guaranteed physical margins
+        // Pass 2: Layout cropped image for printer
         let targetWidth = 576
         
-        // Add exactly 3mm (24 dots) of pure white margin to all 4 edges of the print
-        // This prevents the text from overlapping the sticky edge or falling off the printable area
-        let marginDots = 24
-        let availableWidth = targetWidth - (marginDots * 2)
+        // Use a safe printable width (540) to keep the text ~2mm away from the sticky edge
+        let printableWidth = 540
         
         let contentWidth = croppedImage.height
         let contentHeight = croppedImage.width
         
-        let finalScale = CGFloat(availableWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + (marginDots * 2)
+        let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + 36 // 36 dots padding on feed
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -139,6 +139,7 @@ func main() {
         finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
         finalContext.scaleBy(x: 1.0, y: -1.0)
+        
         finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
