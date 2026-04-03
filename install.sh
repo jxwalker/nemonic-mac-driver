@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 echo "Nemonic MIP-201W Native macOS Driver Installer"
 echo "=============================================="
@@ -11,15 +12,15 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo "1. Compiling Swift driver (Apple Silicon Native)..."
-swiftc pdftonemonic.swift -o pdftonemonic -O
+swiftc "$DIR/pdftonemonic.swift" -o "$DIR/pdftonemonic" -O
 
 echo "2. Installing CUPS filter to /Library/Printers/Nemonic..."
 mkdir -p /Library/Printers/Nemonic
-cp pdftonemonic /Library/Printers/Nemonic/
+cp "$DIR/pdftonemonic" /Library/Printers/Nemonic/
 chmod 755 /Library/Printers/Nemonic/pdftonemonic
 
 echo "3. Patching PPD margins and installing to /Library/Printers/PPDs/Contents/Resources..."
-gzip -dc Nemonic_MIP_201.ppd > /tmp/Nemonic_MIP_201.ppd
+gzip -dc "$DIR/Nemonic_MIP_201.ppd" > /tmp/Nemonic_MIP_201.ppd
 
 sed -i '' -e 's/^\*ImageableArea 80x28mm.*/\*ImageableArea 80x28mm.Transverse\/80 x 28 mm: "0 0 226.8 79.4"/' /tmp/Nemonic_MIP_201.ppd
 sed -i '' -e 's/^\*ImageableArea 80x56mm.*/\*ImageableArea 80x56mm.Transverse\/80 x 56 mm: "0 0 226.8 158.7"/' /tmp/Nemonic_MIP_201.ppd
