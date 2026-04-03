@@ -48,3 +48,23 @@ During the reverse-engineering process, we discovered the printer accepts a slig
 
 ## License
 MIT License. Feel free to fork, modify, and improve.
+
+## Fun Terminal Scripts
+Because this driver turns your Nemonic into a physical extension of your terminal (and auto-crops whitespace), you can script almost anything to it!
+
+We included a bundle of fun scripts you can install directly into your terminal profile (`~/.zshrc`):
+
+```bash
+cd fun_scripts
+sudo ./install_fun_scripts.sh
+source ~/.zshrc
+```
+
+This gives you access to 5 instant commands:
+* **`todo "Task 1" "Task 2"`**: Instantly prints a properly formatted checkbox to-do list.
+* **`focus "One Task"`**: Prints a bold, single task for you to stick to the bottom of your monitor so you don't get distracted.
+* **`weather "London"`**: Prints a live, minimalist ASCII-art weather forecast.
+* **`ticket 123`**: (Requires GitHub CLI). Fetches a GitHub issue and prints a physical Kanban ticket for your wall.
+* **`joke`**: Prints a randomized fortune quote spoken by an ASCII cow (requires `fortune` and `cowsay`).
+
+*(Note: The fun scripts use a custom, lightning-fast native Swift text-to-png renderer to bypass a notorious Apple CUPS sandbox bug that prevents command-line text from rendering system fonts).*
