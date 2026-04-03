@@ -115,14 +115,16 @@ func main() {
         // Pass 2: Layout cropped image for printer
         let targetWidth = 576
         
-        // Use a safe printable width (540) to keep the text ~2mm away from the sticky edge
-        let printableWidth = 540
+        // To fix the right margin overlap, we restrict the layout to 540 dots 
+        // This leaves exactly 36 dots (~4.5mm) of pure white space on the Right (Sticky) edge!
+        let rightMargin = 36
+        let printableWidth = targetWidth - rightMargin
         
         let contentWidth = croppedImage.height
         let contentHeight = croppedImage.width
         
         let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + 36 // 36 dots padding on feed
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -136,10 +138,10 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
+        // Translate to center of PRINTABLE area (pushes the image Left, safely away from the sticky edge)
+        finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
         finalContext.scaleBy(x: 1.0, y: -1.0)
-        
         finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
