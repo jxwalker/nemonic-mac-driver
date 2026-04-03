@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+let maxRenderScale: CGFloat = 2.0
+let feedPaddingDots = 60
+
 func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
     var out = Data()
     out.append(contentsOf: [0x02])
@@ -118,12 +121,11 @@ func main() {
         let contentHeight = croppedImage.width
         
         var finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        if finalScale > 2.0 {
-            finalScale = 2.0
+        if finalScale > maxRenderScale {
+            finalScale = maxRenderScale
         }
         
-        let feedPadding = 60
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPadding
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPaddingDots
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,

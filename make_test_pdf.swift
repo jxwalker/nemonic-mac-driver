@@ -72,6 +72,17 @@ func centeredX(_ s: String, size: CGFloat, bold: Bool = false) -> CGFloat {
     return (pw - tw) / 2
 }
 
+func textWidth(_ s: String, size: CGFloat, bold: Bool = false) -> CGFloat {
+    let fontName = (bold ? "Helvetica-Bold" : "Helvetica") as CFString
+    let font = CTFontCreateWithName(fontName, size, nil)
+    let cfStr = s as CFString
+    let attr = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0)!
+    CFAttributedStringReplaceString(attr, CFRangeMake(0, 0), cfStr)
+    CFAttributedStringSetAttribute(attr, CFRangeMake(0, CFStringGetLength(cfStr)), kCTFontAttributeName, font)
+    let line = CTLineCreateWithAttributedString(attr)
+    return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+}
+
 // ── Layout constants ──────────────────────────────────────────────────────────
 // Using 1-inch (72pt) margins — typical app default.
 let m: CGFloat = 72
@@ -90,14 +101,7 @@ drawText("╔ TOP-LEFT",
          size: cornerSz, bold: true)
 
 let trText = "TOP-RIGHT ╗"
-let trW = { () -> CGFloat in
-    let font = CTFontCreateWithName("Helvetica-Bold" as CFString, cornerSz, nil)
-    let cfS  = trText as CFString
-    let attr = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0)!
-    CFAttributedStringReplaceString(attr, CFRangeMake(0, 0), cfS)
-    CFAttributedStringSetAttribute(attr, CFRangeMake(0, CFStringGetLength(cfS)), kCTFontAttributeName, font)
-    return CGFloat(CTLineGetTypographicBounds(CTLineCreateWithAttributedString(attr), nil, nil, nil))
-}()
+let trW = textWidth(trText, size: cornerSz, bold: true)
 drawText(trText, x: pw - m - trW, y: ph - m - cornerSz, size: cornerSz, bold: true)
 
 drawText("╚ BOT-LEFT",
@@ -106,7 +110,7 @@ drawText("╚ BOT-LEFT",
          size: cornerSz, bold: true)
 
 let brText = "BOT-RIGHT ╝"
-let brW = trW  // same length as TOP-RIGHT
+let brW = textWidth(brText, size: cornerSz, bold: true)
 drawText(brText, x: pw - m - brW, y: m, size: cornerSz, bold: true)
 
 // ── Direction arrows ──────────────────────────────────────────────────────────

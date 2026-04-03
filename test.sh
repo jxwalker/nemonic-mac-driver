@@ -29,7 +29,7 @@ TEST_PNG="${TMPDIR:-/tmp}/nemonic_preview.png"  # keep PNG after EXIT trap
 
 echo ""
 echo "╔══════════════════════════════════════════╗"
-echo "║   Nemonic Driver Test Harness             ║"
+echo "║   Nemonic Driver Test Harness            ║"
 echo "╚══════════════════════════════════════════╝"
 
 # ── Step 1: Test PDF ──────────────────────────────────────────────────────────

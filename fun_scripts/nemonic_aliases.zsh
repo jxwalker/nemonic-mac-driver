@@ -2,6 +2,8 @@
 # NEMONIC PRINTER ALIASES & FUNCTIONS
 # ==========================================
 
+NEMONIC_PRINTER="${NEMONIC_PRINTER:-Nemonic_MIP_201}"
+
 function _nemonic_print_pdf_stream() {
     local tmp_pdf
     tmp_pdf="$(mktemp -t nemonic_fun)"
@@ -24,7 +26,7 @@ function _nemonic_print_pdf_stream() {
     local page_height
     page_height="$(awk -v h="$pdf_height" 'BEGIN { h = (h < 72.0) ? 72.0 : (h > 708.7 ? 708.7 : h); printf "%.1f", h }')"
 
-    lp -d Nemonic_MIP_201 -o "media=Custom.226.8x${page_height}" "$tmp_pdf"
+    lp -d "$NEMONIC_PRINTER" -o "media=Custom.226.8x${page_height}" "$tmp_pdf"
     local rc=$?
     rm -f "$tmp_pdf"
     return $rc
@@ -80,14 +82,27 @@ function ticket() {
         return 1
     fi
     echo "Fetching issue..."
-    gh issue view "$1" | sed -r "s/\x1B\[[0-9;]*[mK]//g" | nemonic_texttopng | _nemonic_print_pdf_stream
+    gh issue view "$1" | sed -E "s/\x1B\[[0-9;]*[mK]//g" | nemonic_texttopng | _nemonic_print_pdf_stream
     echo "Ticket printed!"
 }
 
 # 5. ASCII Joke / Fortune Cow
 function joke() {
     if ! command -v fortune &> /dev/null || ! command -v cowsay &> /dev/null; then
-        echo "Installing fortune and cowsay first..."
+        if ! command -v brew &> /dev/null; then
+            echo "Homebrew is required to install fortune and cowsay. Install brew first, then rerun joke."
+            return 1
+        fi
+        if [ -n "${CI:-}" ] || [ -n "${NO_PROMPT:-}" ]; then
+            echo "fortune/cowsay are missing and auto-install is disabled in non-interactive mode."
+            return 1
+        fi
+        printf "Install fortune and cowsay with Homebrew? [y/N] "
+        read -r reply
+        if [[ ! "$reply" =~ ^[Yy]$ ]]; then
+            echo "Aborting without installing dependencies."
+            return 1
+        fi
         brew install fortune cowsay
     fi
     fortune | cowsay | nemonic_texttopng | _nemonic_print_pdf_stream

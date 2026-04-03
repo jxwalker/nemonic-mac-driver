@@ -27,6 +27,7 @@ echo "3. Copying aliases to ~/.nemonic_aliases.zsh..."
 cp "$SCRIPT_DIR/nemonic_aliases.zsh" ~/.nemonic_aliases.zsh
 
 echo "4. Adding source command to ~/.zshrc..."
+touch ~/.zshrc
 if ! grep -q "nemonic_aliases.zsh" ~/.zshrc; then
     echo "" >> ~/.zshrc
     echo "# Load Nemonic Printer Shortcuts" >> ~/.zshrc

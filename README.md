@@ -56,7 +56,7 @@ We included a bundle of fun scripts you can install directly into your terminal 
 
 ```bash
 cd fun_scripts
-sudo ./install_fun_scripts.sh
+./install_fun_scripts.sh
 source ~/.zshrc
 ```
 
@@ -67,4 +67,4 @@ This gives you access to 5 instant commands:
 * **`ticket 123`**: (Requires GitHub CLI). Fetches a GitHub issue and prints a physical Kanban ticket for your wall.
 * **`joke`**: Prints a randomized fortune quote spoken by an ASCII cow (requires `fortune` and `cowsay`).
 
-*(Note: The fun scripts use a custom, lightning-fast native Swift text-to-png renderer to bypass a notorious Apple CUPS sandbox bug that prevents command-line text from rendering system fonts).*
+*(Note: The fun scripts use a custom, lightning-fast native Swift text-to-pdf renderer to bypass a notorious Apple CUPS sandbox bug that prevents command-line text from rendering system fonts).*

@@ -38,7 +38,11 @@ let bytes = [UInt8](raw)
 
 // ── Find GS v 0: 1D 76 30 00 ──────────────────────────────────────────────
 var gsvIdx: Int? = nil
-for i in 0..<(bytes.count - 8) {
+guard bytes.count >= 4 else {
+    fputs("Error: input is too short to contain a GS v 0 command.\n", stderr)
+    exit(1)
+}
+for i in 0...(bytes.count - 4) {
     if bytes[i] == 0x1D && bytes[i+1] == 0x76 && bytes[i+2] == 0x30 && bytes[i+3] == 0x00 {
         gsvIdx = i; break
     }
