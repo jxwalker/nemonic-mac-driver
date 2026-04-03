@@ -1,26 +1,30 @@
 #!/bin/bash
 set -e
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+SDK_PATH="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+MODULE_CACHE_PATH="/tmp/nemonic-clang-module-cache"
 
 echo "Installing Nemonic Fun Scripts..."
 echo "================================="
 
-echo "1. Compiling native text-to-png renderer..."
-swiftc texttopng.swift -o nemonic_texttopng -O
+echo "1. Compiling native text-to-pdf renderer..."
+mkdir -p "$MODULE_CACHE_PATH"
+CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH" swiftc -sdk "$SDK_PATH" "$SCRIPT_DIR/texttopng.swift" -o "$SCRIPT_DIR/nemonic_texttopng" -O
 
 if [ "$EUID" -ne 0 ]; then
   echo "2. Installing renderer to /usr/local/bin (requires sudo)..."
   sudo mkdir -p /usr/local/bin
-  sudo mv nemonic_texttopng /usr/local/bin/nemonic_texttopng
+  sudo cp "$SCRIPT_DIR/nemonic_texttopng" /usr/local/bin/nemonic_texttopng
   sudo chmod 755 /usr/local/bin/nemonic_texttopng
 else
   echo "2. Installing renderer to /usr/local/bin..."
   mkdir -p /usr/local/bin
-  mv nemonic_texttopng /usr/local/bin/nemonic_texttopng
+  cp "$SCRIPT_DIR/nemonic_texttopng" /usr/local/bin/nemonic_texttopng
   chmod 755 /usr/local/bin/nemonic_texttopng
 fi
 
 echo "3. Copying aliases to ~/.nemonic_aliases.zsh..."
-cp nemonic_aliases.zsh ~/.nemonic_aliases.zsh
+cp "$SCRIPT_DIR/nemonic_aliases.zsh" ~/.nemonic_aliases.zsh
 
 echo "4. Adding source command to ~/.zshrc..."
 if ! grep -q "nemonic_aliases.zsh" ~/.zshrc; then
