@@ -16,7 +16,6 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                // No mirroring, exact byte packing based on our proven raw hardware test
                 let pixel = rawData[y * width + x]
                 if pixel < 128 { 
                     b |= (1 << (7 - bit))
@@ -57,7 +56,7 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        // Pass 1: Render upright PDF exactly as Preview shows it
+        // Pass 1: Render exact PDF as Preview would show it
         let testWidth = 576
         let testScale = CGFloat(testWidth) / pdfWidth
         let testHeight = Int(pdfHeight * testScale)
@@ -75,12 +74,10 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        // Make context Y-DOWN so the memory buffer holds a visually upright image
         testContext.translateBy(x: 0, y: CGFloat(testHeight))
         testContext.scaleBy(x: testScale, y: -testScale)
         
         testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        // Counteract the PDF's internal rotation
         testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
         testContext.translateBy(x: -box.midX, y: -box.midY)
         
@@ -107,17 +104,21 @@ func main() {
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
-            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
+            cropRect = CGRect(x: minX, y: testHeight - 1 - maxY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
         // Pass 2: Layout cropped image for printer
-        let isLandscape = croppedImage.width > croppedImage.height
         let targetWidth = 576
         
-        let contentWidth = isLandscape ? croppedImage.height : croppedImage.width
-        let contentHeight = isLandscape ? croppedImage.width : croppedImage.height
+        // THE UNIFIED THEORY OF NEMONIC:
+        // Because the sticky adhesive runs along the feed roll (right hand side),
+        // the physical printer roll is actually 90 degrees sideways compared to a standard receipt printer.
+        // Therefore, ALL jobs (Portrait and Landscape) must be rotated 90 degrees Clockwise 
+        // to map the document's text flow (X-axis) to the infinite feed roll, and the document's height to the 80mm print head.
+        let contentWidth = croppedImage.height
+        let contentHeight = croppedImage.width
         
         let finalScale = CGFloat(targetWidth) / CGFloat(contentWidth)
         let targetHeight = Int(CGFloat(contentHeight) * finalScale)
@@ -134,17 +135,13 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        // Make context Y-DOWN so it matches the top-to-bottom print sequence
-        finalContext.translateBy(x: 0, y: CGFloat(targetHeight))
-        finalContext.scaleBy(x: 1.0, y: -1.0)
-        
-        // Move to center
         finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        if isLandscape {
-            // Rotate 90 degrees Clockwise to make text run top-to-bottom with sticky on right
-            finalContext.rotate(by: CGFloat.pi / 2.0)
-        }
+        // Make context Y-DOWN so y=0 is the visual Top of the image (Leading edge of paper)
+        finalContext.scaleBy(x: 1.0, y: -1.0)
+        
+        // ALWAYS rotate 90 degrees Clockwise
+        finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
