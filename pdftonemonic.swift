@@ -70,17 +70,13 @@ func main() {
                                           space: colorSpace,
                                           bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
         
-        testContext.setFillColor(CGColor.white)
+        testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: dpiScale, y: -dpiScale)
-        
-        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        testContext.translateBy(x: -box.midX, y: -box.midY)
-        
+        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
+        testContext.concatenate(transform)
         testContext.drawPDFPage(page)
+        
         guard let testImage = testContext.makeImage() else { continue }
         
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
@@ -112,6 +108,11 @@ func main() {
         let rightMargin = 24 
         let printableWidth = targetWidth - rightMargin
         
+        // UNCONDITIONAL ROTATION:
+        // The user holds the paper with sticky on the right, reading top-to-bottom.
+        // The printer physical roll is 80mm wide.
+        // Therefore, ALL jobs must be rotated 90 degrees Clockwise to map the document's width 
+        // to the infinite feed roll, and the document's height to the 80mm print head.
         let contentRollWidth = croppedImage.height
         let contentRollLength = croppedImage.width
         
@@ -132,11 +133,14 @@ func main() {
                                            space: colorSpace,
                                            bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
         
-        finalContext.setFillColor(CGColor.white)
+        finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
+        
         finalContext.scaleBy(x: 1.0, y: -1.0)
+        
+        // UNCONDITIONAL 90 DEGREE CLOCKWISE ROTATION
         finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
