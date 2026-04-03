@@ -99,7 +99,8 @@ func main() {
         
         var cropRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
         if minX <= maxX && minY <= maxY {
-            let padding = 16
+            // Tight crop - we apply the true physical margins in Pass 2
+            let padding = 0
             minX = max(0, minX - padding)
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
@@ -109,19 +110,19 @@ func main() {
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Pass 2: Layout cropped image for printer
+        // Pass 2: Layout cropped image for printer with guaranteed physical margins
         let targetWidth = 576
         
-        // THE UNIFIED THEORY OF NEMONIC:
-        // Because the sticky adhesive runs along the feed roll (right hand side),
-        // the physical printer roll is actually 90 degrees sideways compared to a standard receipt printer.
-        // Therefore, ALL jobs (Portrait and Landscape) must be rotated 90 degrees Clockwise 
-        // to map the document's text flow (X-axis) to the infinite feed roll, and the document's height to the 80mm print head.
+        // Add exactly 3mm (24 dots) of pure white margin to all 4 edges of the print
+        // This prevents the text from overlapping the sticky edge or falling off the printable area
+        let marginDots = 24
+        let availableWidth = targetWidth - (marginDots * 2)
+        
         let contentWidth = croppedImage.height
         let contentHeight = croppedImage.width
         
-        let finalScale = CGFloat(targetWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
+        let finalScale = CGFloat(availableWidth) / CGFloat(contentWidth)
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + (marginDots * 2)
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -137,10 +138,7 @@ func main() {
         
         finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        // Make context Y-DOWN so y=0 is the visual Top of the image (Leading edge of paper)
         finalContext.scaleBy(x: 1.0, y: -1.0)
-        
-        // ALWAYS rotate 90 degrees Clockwise
         finalContext.rotate(by: CGFloat.pi / 2.0)
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
