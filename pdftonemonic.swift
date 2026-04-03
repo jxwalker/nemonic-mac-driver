@@ -56,10 +56,9 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        // Pass 1: Render exact PDF as Preview would show it
-        let testWidth = 576
-        let testScale = CGFloat(testWidth) / pdfWidth
-        let testHeight = Int(pdfHeight * testScale)
+        let dpiScale: CGFloat = 203.0 / 72.0 
+        let testWidth = Int(pdfWidth * dpiScale)
+        let testHeight = Int(pdfHeight * dpiScale)
         
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
@@ -71,11 +70,11 @@ func main() {
                                           space: colorSpace,
                                           bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
         
-        testContext.setFillColor(.white)
+        testContext.setFillColor(CGColor.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
         testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: testScale, y: -testScale)
+        testContext.scaleBy(x: dpiScale, y: -dpiScale)
         
         testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
         testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
@@ -84,7 +83,6 @@ func main() {
         testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         
-        // Find non-white pixel bounds (Auto-Crop)
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
@@ -112,18 +110,20 @@ func main() {
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Pass 2: Layout cropped image for printer
         let targetWidth = 576
-        
-        // Use exactly 12 dots (~1.5mm) margin as requested in 2057973
-        let rightMargin = 12
+        let rightMargin = 12 
         let printableWidth = targetWidth - rightMargin
         
         let contentWidth = croppedImage.height
         let contentHeight = croppedImage.width
         
-        let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
+        var finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
+        if finalScale > 2.0 {
+            finalScale = 2.0
+        }
+        
+        let feedPadding = 60
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPadding
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -134,11 +134,10 @@ func main() {
                                            space: colorSpace,
                                            bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
         
-        finalContext.setFillColor(.white)
+        finalContext.setFillColor(CGColor.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
-        
         finalContext.scaleBy(x: 1.0, y: -1.0)
         finalContext.rotate(by: CGFloat.pi / 2.0)
         
