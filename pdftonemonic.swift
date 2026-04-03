@@ -115,24 +115,15 @@ func main() {
         // Pass 2: Layout cropped image for printer
         let targetWidth = 576
         
-        // Use 12 dots (~1.5mm) margin to push text away from sticky edge
+        // Use exactly 12 dots (~1.5mm) margin as requested in 2057973
         let rightMargin = 12
         let printableWidth = targetWidth - rightMargin
         
         let contentWidth = croppedImage.height
         let contentHeight = croppedImage.width
         
-        var finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        
-        // ONLY CHANGE FROM THE "WORKED PERFECTLY" SCRIPT:
-        // Cap the maximum scale multiplier so short lines don't get blown up into 160mm giant banners.
-        if finalScale > 2.0 {
-            finalScale = 2.0
-        }
-        
-        // ADDED: 40 dots (~5mm) feed padding so the printer blade cuts blank paper, not the edge of the text.
-        let feedPadding = 40
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPadding
+        let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -146,7 +137,6 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        // Translate to center of PRINTABLE area
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
         finalContext.scaleBy(x: 1.0, y: -1.0)
