@@ -1,7 +1,5 @@
 import Cocoa
 
-// This utility safely renders text to a PNG image outside the CUPS sandbox, 
-// bypassing the macOS `cgtexttopdf` empty-PDF bug.
 let args = CommandLine.arguments.dropFirst()
 var text = ""
 if args.isEmpty {
@@ -13,25 +11,42 @@ if args.isEmpty {
 
 if text.isEmpty { exit(1) }
 
-let font = NSFont.monospacedSystemFont(ofSize: 32, weight: .bold)
+// Use a large 48pt font, which at 1:1 pixel mapping (203 DPI) prints beautifully bold 6mm text
+let font = NSFont.monospacedSystemFont(ofSize: 48, weight: .bold)
+let paragraphStyle = NSMutableParagraphStyle()
+paragraphStyle.lineBreakMode = .byWordWrapping
+
 let attributes: [NSAttributedString.Key: Any] = [
     .font: font,
-    .foregroundColor: NSColor.black
+    .foregroundColor: NSColor.black,
+    .paragraphStyle: paragraphStyle
 ]
+
 let attrString = NSAttributedString(string: text, attributes: attributes)
-let textSize = attrString.size()
+let maxWidth: CGFloat = 500.0 // Leaves generous margins on an 80mm roll
+
+let textRect = attrString.boundingRect(with: NSSize(width: maxWidth, height: .greatestFiniteMagnitude), options: [.usesLineFragmentOrigin, .usesFontLeading])
 
 let padding: CGFloat = 20
-let imageSize = NSSize(width: textSize.width + padding*2, height: textSize.height + padding*2)
+let imageWidth = Int(maxWidth + padding*2)
+let imageHeight = Int(textRect.height + padding*2)
 
-let image = NSImage(size: imageSize)
-image.lockFocus()
-NSColor.white.set()
-NSRect(origin: .zero, size: imageSize).fill()
-attrString.draw(at: NSPoint(x: padding, y: padding))
-image.unlockFocus()
+let colorSpace = CGColorSpaceCreateDeviceRGB()
+let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+guard let context = CGContext(data: nil, width: imageWidth, height: imageHeight, bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace, bitmapInfo: bitmapInfo) else { exit(1) }
 
-guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { exit(1) }
+context.setFillColor(.white)
+context.fill(CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight))
+
+let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = graphicsContext
+
+attrString.draw(with: NSRect(x: padding, y: padding, width: maxWidth, height: textRect.height), options: [.usesLineFragmentOrigin, .usesFontLeading])
+
+NSGraphicsContext.restoreGraphicsState()
+
+guard let cgImage = context.makeImage() else { exit(1) }
 let bitmapRep = NSBitmapImageRep(cgImage: cgImage)
 guard let pngData = bitmapRep.representation(using: .png, properties: [:]) else { exit(1) }
 
