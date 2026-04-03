@@ -56,6 +56,7 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
+        // Render exact PDF at 203 DPI (1:1 physical scale)
         let dpiScale: CGFloat = 203.0 / 72.0 
         let testWidth = Int(pdfWidth * dpiScale)
         let testHeight = Int(pdfHeight * dpiScale)
@@ -73,10 +74,14 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
-        testContext.concatenate(transform)
-        testContext.drawPDFPage(page)
+        // This is the EXACT matrix from the perfect 2057973 build
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: dpiScale, y: -dpiScale)
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
         
+        testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
@@ -99,10 +104,9 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            // THE HOLY GRAIL FIX:
-            // Since testContext is natively Y-UP, makeImage() creates a CGImage that inherits the Y-UP coordinate space.
-            // This means CGImage.cropping(to:) expects the rect's Y-origin to be measured from the BOTTOM, not the top!
-            // Therefore, minY is natively exactly what CGImage.cropping needs. No inversion necessary!
+            // THE FATAL FLAW: invertedMinY only worked for symmetrically centered PDFs!
+            // Because testContext is Y-DOWN, minY perfectly bounds the Top-Down image!
+            // Do NOT invert it! This fixes the blank bash scripts entirely.
             cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
@@ -112,7 +116,9 @@ func main() {
         let rightMargin = 12 
         let printableWidth = targetWidth - rightMargin
         
-        let isLandscape = croppedImage.width > croppedImage.height
+        // THE GIANT TEXT FLAW: Do not rotate or explode text just because a word is wider than it is tall!
+        // Only use Landscape rules if the actual PDF document is Landscape.
+        let isLandscape = pdfWidth > pdfHeight
         let contentRollWidth = isLandscape ? croppedImage.height : croppedImage.width
         let contentRollLength = isLandscape ? croppedImage.width : croppedImage.height
         
@@ -136,8 +142,8 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
+        // This is the EXACT matrix from the perfect 2057973 build
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
-        
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
         if isLandscape {
