@@ -16,7 +16,7 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                // Raw test proved hardware does NOT mirror. Read naturally Left-to-Right.
+                // No mirroring, exact byte packing based on our proven raw hardware test
                 let pixel = rawData[y * width + x]
                 if pixel < 128 { 
                     b |= (1 << (7 - bit))
@@ -57,6 +57,7 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
+        // Pass 1: Render upright PDF exactly as Preview shows it
         let testWidth = 576
         let testScale = CGFloat(testWidth) / pdfWidth
         let testHeight = Int(pdfHeight * testScale)
@@ -74,14 +75,19 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        // Render PDF EXACTLY as preview shows it
-        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
-        testContext.concatenate(transform)
-        testContext.drawPDFPage(page)
+        // Make context Y-DOWN so the memory buffer holds a visually upright image
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: testScale, y: -testScale)
         
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        // Counteract the PDF's internal rotation
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
+        
+        testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         
-        // Find non-white pixel bounds. testData is Y-UP (bottom-left origin)
+        // Find non-white pixel bounds (Auto-Crop)
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
@@ -101,16 +107,12 @@ func main() {
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
-            
-            // Convert Y-UP bounds to Top-Left origin for CGImage.cropping
-            let invertedMinY = testHeight - 1 - maxY
-            let invertedMaxY = testHeight - 1 - minY
-            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
+            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Layout cropped image for printer
+        // Pass 2: Layout cropped image for printer
         let isLandscape = croppedImage.width > croppedImage.height
         let targetWidth = 576
         
@@ -132,14 +134,15 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
-        
-        // Make finalContext Y-DOWN so y=0 is the visual Top of the image
+        // Make context Y-DOWN so it matches the top-to-bottom print sequence
+        finalContext.translateBy(x: 0, y: CGFloat(targetHeight))
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
+        // Move to center
+        finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
+        
         if isLandscape {
-            // +90 Clockwise in Y-DOWN puts the Top edge of the text on the Right edge (Sticky side)
-            // Reads perfectly Top-to-Bottom.
+            // Rotate 90 degrees Clockwise to make text run top-to-bottom with sticky on right
             finalContext.rotate(by: CGFloat.pi / 2.0)
         }
         
