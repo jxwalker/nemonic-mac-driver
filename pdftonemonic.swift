@@ -16,8 +16,7 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> Data {
             var b: UInt8 = 0
             for bit in 0..<8 {
                 let x = xB * 8 + bit
-                // MANUAL X-FLIP: This isolates the hardware mirror bug from the layout logic.
-                // It guarantees the printout matches our CGContext exactly.
+                // Software X-Flip to exactly cancel the printer's hardware mirror defect
                 let mirroredX = width - 1 - x
                 let pixel = rawData[y * width + mirroredX]
                 if pixel < 128 { 
@@ -136,11 +135,13 @@ func main() {
         
         finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        // Y-DOWN so that y=0 in finalData corresponds to Top of image (Leading edge)
+        // Only flip Y here to ensure visual top-down rendering in finalData.
+        // We DO NOT flip X here because we already flip X in the byte packaging step!
+        // Flipping X twice was causing the mirror image and reversed rotation.
         finalContext.scaleBy(x: 1.0, y: -1.0)
         
         if isLandscape {
-            // +90 Clockwise in Y-DOWN puts the top of the text on the Right (Sticky side)
+            // Rotate +90 degrees (Clockwise in this coordinate system)
             finalContext.rotate(by: CGFloat.pi / 2.0)
         }
         
