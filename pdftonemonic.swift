@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+let maxRenderScale: CGFloat = 2.0
+let feedPaddingDots = 60
+
 func debugDirectoryURL() -> URL? {
     guard let path = ProcessInfo.processInfo.environment["NEMONIC_DEBUG_DIR"],
           !path.isEmpty else {
@@ -90,7 +93,7 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> (Data, [UInt8]
     out.append(contentsOf: [0x1D, 0x76, 0x30, 0x00])
     out.append(contentsOf: [UInt8(wBytes & 0xFF), UInt8((wBytes >> 8) & 0xFF)])
     out.append(contentsOf: [UInt8(height & 0xFF), UInt8((height >> 8) & 0xFF)])
-    
+
     for y in 0..<height {
         for xB in 0..<wBytes {
             var b: UInt8 = 0
@@ -107,13 +110,13 @@ func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> (Data, [UInt8]
             out.append(b)
         }
     }
-    
+
     out.append(contentsOf: [0x1B, 0x43, 0x01])
     out.append(contentsOf: [0x1B, 0x6C, 0x00])
     out.append(contentsOf: [0x1B, 0x50])
     out.append(contentsOf: [0x1B, 0x69])
     out.append(contentsOf: [0x03])
-    
+
     return (out, monoData)
 }
 
@@ -121,7 +124,6 @@ func main() {
     let args = CommandLine.arguments
     let debugDir = debugDirectoryURL()
     let previewOnly = shouldPreviewOnly()
-    let renderWidth = max(576, envInt("NEMONIC_RENDER_WIDTH", default: 1152))
     let cropPadding = max(0, envInt("NEMONIC_CROP_PADDING", default: 16))
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
@@ -132,7 +134,7 @@ func main() {
     } else {
         pdfData = FileHandle.standardInput.readDataToEndOfFile()
     }
-    
+
     guard let provider = CGDataProvider(data: pdfData as CFData),
           let pdfDoc = CGPDFDocument(provider) else { exit(1) }
 
@@ -146,10 +148,9 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
 
-        // Pass 1: Render the page into a raw grayscale bitmap using a Y-up context.
-        let testWidth = renderWidth
-        let testScale = CGFloat(testWidth) / max(pdfWidth, 1)
-        let testHeight = max(1, Int(ceil(pdfHeight * testScale)))
+        let dpiScale: CGFloat = 203.0 / 72.0
+        let testWidth = Int(pdfWidth * dpiScale)
+        let testHeight = Int(pdfHeight * dpiScale)
 
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
@@ -161,21 +162,24 @@ func main() {
                                           space: colorSpace,
                                           bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
 
-        testContext.setFillColor(.white)
+        testContext.setFillColor(CGColor.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
 
-        let renderRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
-        let drawingTransform = page.getDrawingTransform(.mediaBox,
-                                                        rect: renderRect,
-                                                        rotate: 0,
-                                                        preserveAspectRatio: true)
-        testContext.concatenate(drawingTransform)
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: dpiScale, y: -dpiScale)
+
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
+
         testContext.drawPDFPage(page)
         guard let testImage = testContext.makeImage() else { continue }
         saveDebugImage(testImage, pageNum: pageNum, stage: "rendered", directory: debugDir)
 
-        // Find non-white pixel bounds (Auto-Crop)
-        var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
+        var minX = testWidth
+        var maxX = 0
+        var minY = testHeight
+        var maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
                 if testData[y * testWidth + x] < 250 {
@@ -195,27 +199,29 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
 
+            let invertedMinY = testHeight - 1 - maxY
+            let invertedMaxY = testHeight - 1 - minY
             cropRect = CGRect(x: minX,
-                              y: minY,
+                              y: invertedMinY,
                               width: maxX - minX + 1,
-                              height: maxY - minY + 1)
+                              height: invertedMaxY - invertedMinY + 1)
         }
 
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         saveDebugImage(croppedImage, pageNum: pageNum, stage: "cropped", directory: debugDir)
 
-        // Pass 2: Layout cropped image for printer
         let targetWidth = 576
-
-        // Keep a white band on the sticky edge so printed content does not climb onto the adhesive.
         let printableWidth = targetWidth - rightMargin
 
-        let contentWidth = croppedImage.width
-        let contentHeight = croppedImage.height
-        let finalScale = (CGFloat(printableWidth) / CGFloat(max(contentWidth, contentHeight))) * CGFloat(scaleAdjust)
-        let drawWidth = CGFloat(contentWidth) * finalScale
-        let drawHeight = CGFloat(contentHeight) * finalScale
-        let targetHeight = max(1, Int(ceil(drawWidth)))
+        let contentWidth = croppedImage.height
+        let contentHeight = croppedImage.width
+
+        var finalScale = (CGFloat(printableWidth) / CGFloat(contentWidth)) * CGFloat(scaleAdjust)
+        if finalScale > maxRenderScale {
+            finalScale = maxRenderScale
+        }
+
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPaddingDots
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -226,16 +232,16 @@ func main() {
                                            space: colorSpace,
                                            bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
 
-        finalContext.setFillColor(.white)
+        finalContext.setFillColor(CGColor.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         finalContext.interpolationQuality = interpolationQuality
 
-        // Rotate 90° clockwise in a Y-up context. The raster's right edge is the physical top.
-        let stickyGap = CGFloat(rightMargin)
-        let xPos = CGFloat(targetWidth) - (drawHeight / 2.0) - stickyGap
-        let yPos = CGFloat(targetHeight) / 2.0
-        finalContext.translateBy(x: xPos, y: yPos)
-        finalContext.rotate(by: -.pi / 2.0)
+        finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
+        finalContext.scaleBy(x: 1.0, y: -1.0)
+        finalContext.rotate(by: CGFloat.pi / 2.0)
+
+        let drawWidth = CGFloat(croppedImage.width) * finalScale
+        let drawHeight = CGFloat(croppedImage.height) * finalScale
         finalContext.draw(croppedImage,
                           in: CGRect(x: -drawWidth / 2.0,
                                      y: -drawHeight / 2.0,
