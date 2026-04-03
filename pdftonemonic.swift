@@ -121,8 +121,12 @@ func main() {
         let contentWidth = croppedImage.width
         let contentHeight = croppedImage.height
 
-        let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
+        // Rotate 90° CW so the sticky strip (trailing/right edge) ends up at the top when
+        // the label is held Post-it style. After rotation, contentHeight spans the print
+        // width and contentWidth becomes the feed-direction length.
+        var finalScale = CGFloat(printableWidth) / CGFloat(contentHeight)
+        if finalScale > 3.0 { finalScale = 3.0 }  // cap: avoid absurdly long labels for very short content
+        let targetHeight = Int(CGFloat(contentWidth) * finalScale)
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -136,13 +140,14 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
 
-        // Draw content centered horizontally, flipping Y (CG origin is bottom-left, raster is top-left)
-        let drawWidth = CGFloat(contentWidth) * finalScale
+        // Draw content rotated 90° CW: translate to center, flip Y, rotate π/2 (CCW in
+        // math coords → CW in screen coords after the Y flip), then draw centered.
+        let drawWidth  = CGFloat(contentWidth)  * finalScale
         let drawHeight = CGFloat(contentHeight) * finalScale
-        let xOffset = (CGFloat(targetWidth) - drawWidth) / 2.0
-        finalContext.translateBy(x: xOffset, y: CGFloat(targetHeight))
+        finalContext.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         finalContext.scaleBy(x: 1.0, y: -1.0)
-        finalContext.draw(croppedImage, in: CGRect(x: 0, y: 0, width: drawWidth, height: drawHeight))
+        finalContext.rotate(by: .pi / 2.0)
+        finalContext.draw(croppedImage, in: CGRect(x: -drawWidth / 2.0, y: -drawHeight / 2.0, width: drawWidth, height: drawHeight))
         
         let escposData = ditherAndPrint(rawData: finalData, width: targetWidth, height: targetHeight)
         FileHandle.standardOutput.write(escposData)
