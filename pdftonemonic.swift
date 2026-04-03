@@ -56,8 +56,6 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        // Pass 1: Render exact PDF at a strict 1:1 physical scale (203 DPI)
-        // This prevents short text from being blown up to massive sizes!
         let dpiScale: CGFloat = 203.0 / 72.0 
         let testWidth = Int(pdfWidth * dpiScale)
         let testHeight = Int(pdfHeight * dpiScale)
@@ -81,7 +79,6 @@ func main() {
         
         guard let testImage = testContext.makeImage() else { continue }
         
-        // Find non-white pixel bounds (Auto-Crop)
         var minX = testWidth, maxX = 0, minY = testHeight, maxY = 0
         for y in 0..<testHeight {
             for x in 0..<testWidth {
@@ -96,37 +93,34 @@ func main() {
         
         var cropRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
         if minX <= maxX && minY <= maxY {
-            let padding = 16 // Add ~2mm of whitespace around the text
+            let padding = 16
             minX = max(0, minX - padding)
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
             
-            let invertedMinY = testHeight - 1 - maxY
-            let invertedMaxY = testHeight - 1 - minY
-            cropRect = CGRect(x: minX, y: invertedMinY, width: maxX - minX + 1, height: invertedMaxY - invertedMinY + 1)
+            // THE HOLY GRAIL FIX:
+            // Since testContext is natively Y-UP, makeImage() creates a CGImage that inherits the Y-UP coordinate space.
+            // This means CGImage.cropping(to:) expects the rect's Y-origin to be measured from the BOTTOM, not the top!
+            // Therefore, minY is natively exactly what CGImage.cropping needs. No inversion necessary!
+            cropRect = CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
         }
         
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         
-        // Pass 2: Layout cropped image for printer
         let targetWidth = 576
-        let rightMargin = 12 // 1.5mm physical margin from the sticky edge
+        let rightMargin = 12 
         let printableWidth = targetWidth - rightMargin
         
         let isLandscape = croppedImage.width > croppedImage.height
         let contentRollWidth = isLandscape ? croppedImage.height : croppedImage.width
         let contentRollLength = isLandscape ? croppedImage.width : croppedImage.height
         
-        // INTELLIGENT SCALING: 
-        // Only scale DOWN if the text is wider than the 80mm roll. 
-        // NEVER scale up short text, otherwise it prints giant letters and wastes paper!
         var finalScale: CGFloat = 1.0
         if contentRollWidth > printableWidth {
             finalScale = CGFloat(printableWidth) / CGFloat(contentRollWidth)
         }
         
-        // Add 40 dots (~5mm) of physical padding to the top and bottom of the printed strip
         let feedPadding = 40
         let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
         
@@ -142,7 +136,6 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        // Center the text within the printable area
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
         finalContext.scaleBy(x: 1.0, y: -1.0)
