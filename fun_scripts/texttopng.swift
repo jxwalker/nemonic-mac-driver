@@ -101,7 +101,7 @@ while contentWidth > (maxPageWidth - padding * 2) && fontSize > minFontSize {
     contentWidth = longestLineWidth(lines: layoutLines, attributes: attributes)
 }
 
-let font = attributes[.font] as! NSFont
+guard let font = attributes[.font] as? NSFont else { exit(1) }
 let lineHeight = ceil(font.ascender - font.descender + font.leading + lineSpacing)
 let contentHeight = max(lineHeight, CGFloat(layoutLines.count) * lineHeight)
 

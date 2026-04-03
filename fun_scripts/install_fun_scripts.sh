@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SDK_PATH="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
 MODULE_CACHE_PATH="/tmp/nemonic-clang-module-cache"
 
 echo "Installing Nemonic Fun Scripts..."
 echo "================================="
 
 echo "1. Compiling native text-to-pdf renderer..."
+SDK_PATH="$(xcrun --show-sdk-path)"
 mkdir -p "$MODULE_CACHE_PATH"
 CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH" swiftc -sdk "$SDK_PATH" "$SCRIPT_DIR/texttopng.swift" -o "$SCRIPT_DIR/nemonic_texttopng" -O
 

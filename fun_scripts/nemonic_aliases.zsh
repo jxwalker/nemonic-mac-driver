@@ -10,7 +10,7 @@ function _nemonic_print_pdf_stream() {
     cat > "$tmp_pdf"
 
     local media_box
-    media_box="$(strings -n 1 "$tmp_pdf" | rg -m1 '/MediaBox \[0 0 ([0-9.]+) ([0-9.]+)\]' -or '$1 $2')"
+    media_box="$(strings -n 1 "$tmp_pdf" | sed -En 's/.*\/MediaBox \[0 0 ([0-9.]+) ([0-9.]+)\].*/\1 \2/p' | head -n 1)"
     if [ -z "$media_box" ]; then
         echo "Failed to determine PDF page size." >&2
         rm -f "$tmp_pdf"
@@ -22,12 +22,7 @@ function _nemonic_print_pdf_stream() {
 
     # The printer width is fixed at 80mm (226.8pt). Height is variable.
     local page_height
-    page_height="$(python3 - <<PY
-height = float(${pdf_height})
-height = max(72.0, min(708.7, height))
-print(f"{height:.1f}")
-PY
-)"
+    page_height="$(awk -v h="$pdf_height" 'BEGIN { h = (h < 72.0) ? 72.0 : (h > 708.7 ? 708.7 : h); printf "%.1f", h }')"
 
     lp -d Nemonic_MIP_201 -o "media=Custom.226.8x${page_height}" "$tmp_pdf"
     local rc=$?
