@@ -56,10 +56,11 @@ func main() {
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
         
-        // Pass 1: Render exact PDF as Preview would show it
-        let testWidth = 576
-        let testScale = CGFloat(testWidth) / pdfWidth
-        let testHeight = Int(pdfHeight * testScale)
+        // Pass 1: Render exact PDF at a strict 1:1 physical scale (203 DPI)
+        // This prevents short text from being blown up to massive sizes!
+        let dpiScale: CGFloat = 203.0 / 72.0 
+        let testWidth = Int(pdfWidth * dpiScale)
+        let testHeight = Int(pdfHeight * dpiScale)
         
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
@@ -74,14 +75,10 @@ func main() {
         testContext.setFillColor(.white)
         testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
         
-        testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: testScale, y: -testScale)
-        
-        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        testContext.translateBy(x: -box.midX, y: -box.midY)
-        
+        let transform = page.getDrawingTransform(.mediaBox, rect: CGRect(x: 0, y: 0, width: testWidth, height: testHeight), rotate: 0, preserveAspectRatio: true)
+        testContext.concatenate(transform)
         testContext.drawPDFPage(page)
+        
         guard let testImage = testContext.makeImage() else { continue }
         
         // Find non-white pixel bounds (Auto-Crop)
@@ -99,7 +96,7 @@ func main() {
         
         var cropRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
         if minX <= maxX && minY <= maxY {
-            let padding = 16
+            let padding = 16 // Add ~2mm of whitespace around the text
             minX = max(0, minX - padding)
             minY = max(0, minY - padding)
             maxX = min(testWidth - 1, maxX + padding)
@@ -114,16 +111,24 @@ func main() {
         
         // Pass 2: Layout cropped image for printer
         let targetWidth = 576
-        
-        // Decreased right margin to 12 dots (~1.5mm) to shift the text 3mm "back up" closer to the sticky edge.
-        let rightMargin = 12
+        let rightMargin = 12 // 1.5mm physical margin from the sticky edge
         let printableWidth = targetWidth - rightMargin
         
-        let contentWidth = croppedImage.height
-        let contentHeight = croppedImage.width
+        let isLandscape = croppedImage.width > croppedImage.height
+        let contentRollWidth = isLandscape ? croppedImage.height : croppedImage.width
+        let contentRollLength = isLandscape ? croppedImage.width : croppedImage.height
         
-        let finalScale = CGFloat(printableWidth) / CGFloat(contentWidth)
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale)
+        // INTELLIGENT SCALING: 
+        // Only scale DOWN if the text is wider than the 80mm roll. 
+        // NEVER scale up short text, otherwise it prints giant letters and wastes paper!
+        var finalScale: CGFloat = 1.0
+        if contentRollWidth > printableWidth {
+            finalScale = CGFloat(printableWidth) / CGFloat(contentRollWidth)
+        }
+        
+        // Add 40 dots (~5mm) of physical padding to the top and bottom of the printed strip
+        let feedPadding = 40
+        let targetHeight = Int(CGFloat(contentRollLength) * finalScale) + feedPadding
         
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -137,11 +142,14 @@ func main() {
         finalContext.setFillColor(.white)
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         
-        // Translate to center of PRINTABLE area
+        // Center the text within the printable area
         finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
         finalContext.scaleBy(x: 1.0, y: -1.0)
-        finalContext.rotate(by: CGFloat.pi / 2.0)
+        
+        if isLandscape {
+            finalContext.rotate(by: CGFloat.pi / 2.0)
+        }
         
         let drawWidth = CGFloat(croppedImage.width) * finalScale
         let drawHeight = CGFloat(croppedImage.height) * finalScale
