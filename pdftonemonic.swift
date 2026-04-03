@@ -68,13 +68,14 @@ func main() {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
         
         let mediaBox = page.getBoxRect(.mediaBox)
+        let isLandscape = mediaBox.width > mediaBox.height
         
-        // FIXED PAPER SIZING:
-        // The physical print head is 80mm wide (576 dots). 
-        // We MUST map the PDF's width to the printer's width to maintain the correct aspect ratio.
-        let targetWidth = 576
-        let scale = CGFloat(targetWidth) / mediaBox.width
-        let targetHeight = Int(mediaBox.height * scale)
+        let targetWidth = 576 // 80mm fixed print head width
+        let baseDimension = isLandscape ? mediaBox.height : mediaBox.width
+        let longDimension = isLandscape ? mediaBox.width : mediaBox.height
+        
+        let scale = CGFloat(targetWidth) / baseDimension
+        let targetHeight = Int(longDimension * scale)
         
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(data: nil,
@@ -90,8 +91,12 @@ func main() {
         
         context.translateBy(x: CGFloat(targetWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
         
-        // Removed the hardcoded 90-degree rotation.
-        // Flipped X (-scale) to fix mirror image. Flipped Y (-scale) to fix PDF upside-down.
+        if isLandscape {
+            // Rotate 90 degrees to align the wide document along the length of the roll
+            context.rotate(by: -CGFloat.pi / 2.0)
+        }
+        
+        // Scale X by -1 (mirror correction), Scale Y by -1 (fix upside-down)
         context.scaleBy(x: -scale, y: -scale)
         
         context.translateBy(x: -mediaBox.width / 2.0, y: -mediaBox.height / 2.0)
