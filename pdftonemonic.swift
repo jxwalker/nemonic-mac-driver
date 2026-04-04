@@ -130,13 +130,26 @@ func main() {
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
     var pdfData: Data
     if args.count >= 7 {
-        pdfData = try! Data(contentsOf: URL(fileURLWithPath: args[6]))
+        let path = args[6]
+        if path.isEmpty || path == "-" {
+            pdfData = FileHandle.standardInput.readDataToEndOfFile()
+        } else {
+            pdfData = (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data()
+        }
     } else {
         pdfData = FileHandle.standardInput.readDataToEndOfFile()
     }
 
+    if pdfData.isEmpty {
+        fputs("pdftonemonic: no PDF bytes (empty argv path or stdin).\n", stderr)
+        exit(1)
+    }
+
     guard let provider = CGDataProvider(data: pdfData as CFData),
-          let pdfDoc = CGPDFDocument(provider) else { exit(1) }
+          let pdfDoc = CGPDFDocument(provider) else {
+        fputs("pdftonemonic: could not open PDF from job data.\n", stderr)
+        exit(1)
+    }
 
     var pagesEmitted = 0
     for pageNum in 1...pdfDoc.numberOfPages {
@@ -153,29 +166,45 @@ func main() {
         let testWidth = Int(pdfWidth * dpiScale)
         let testHeight = Int(pdfHeight * dpiScale)
 
-        let colorSpace = CGColorSpaceCreateDeviceGray()
+        // Render into DeviceRGB first: some PDFs (transparency / blend) rasterize empty in DeviceGray.
+        let colorSpaceRGB = CGColorSpaceCreateDeviceRGB()
+        let bmpRGB = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        var testDataRGB = [UInt8](repeating: 0, count: max(1, testWidth * testHeight * 4))
+        guard let rgbContext = CGContext(data: &testDataRGB,
+                                         width: testWidth,
+                                         height: testHeight,
+                                         bitsPerComponent: 8,
+                                         bytesPerRow: testWidth * 4,
+                                         space: colorSpaceRGB,
+                                         bitmapInfo: bmpRGB) else { continue }
+
+        rgbContext.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        rgbContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
+
+        rgbContext.translateBy(x: 0, y: CGFloat(testHeight))
+        rgbContext.scaleBy(x: dpiScale, y: -dpiScale)
+
+        rgbContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        rgbContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        rgbContext.translateBy(x: -box.midX, y: -box.midY)
+
+        rgbContext.drawPDFPage(page)
+        guard let rgbImage = rgbContext.makeImage() else { continue }
+
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
-        guard let testContext = CGContext(data: &testData,
-                                          width: testWidth,
-                                          height: testHeight,
-                                          bitsPerComponent: 8,
-                                          bytesPerRow: testWidth,
-                                          space: colorSpace,
-                                          bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
-
-        testContext.setFillColor(CGColor.white)
-        testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
-
-        testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: dpiScale, y: -dpiScale)
-
-        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        testContext.translateBy(x: -box.midX, y: -box.midY)
-
-        testContext.drawPDFPage(page)
-        guard let testImage = testContext.makeImage() else { continue }
-        saveDebugImage(testImage, pageNum: pageNum, stage: "rendered", directory: debugDir)
+        let colorSpace = CGColorSpaceCreateDeviceGray()
+        guard let grayRaster = CGContext(data: &testData,
+                                         width: testWidth,
+                                         height: testHeight,
+                                         bitsPerComponent: 8,
+                                         bytesPerRow: testWidth,
+                                         space: colorSpace,
+                                         bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
+        grayRaster.interpolationQuality = interpolationQuality
+        grayRaster.draw(rgbImage, in: CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
+        guard let testImage = grayRaster.makeImage() else { continue }
+        saveDebugImage(rgbImage, pageNum: pageNum, stage: "rendered-rgb", directory: debugDir)
+        saveDebugImage(testImage, pageNum: pageNum, stage: "rendered-gray", directory: debugDir)
 
         var minX = testWidth
         var maxX = 0
