@@ -15,6 +15,18 @@ This project completely reverse-engineers the printer's proprietary USB protocol
 * **Sideways Feed Correction**: Because the sticky tape runs along the feed roll (the right-hand side), the physical printer is actually 90 degrees sideways compared to a standard POS receipt printer. The driver automatically maps and rotates all print jobs 90 degrees clockwise so your text *always* reads flawlessly top-to-bottom!
 * **Prints Anything**: Accurately reproduces system fonts, vector graphics, shapes, barcodes, and QR codes natively.
 
+## Before you use paper (preflight)
+
+**Never send a job straight to the printer** until a PDF has been checked offline:
+
+```bash
+bash preflight_pdf.sh --open /path/to/same-file-you-will-print.pdf
+```
+
+This compiles the filter from the repo, builds the same ESC/POS bytes, counts black dots, and writes **`/tmp/nemonic_preflight.png`**. It **fails** (exit 1) if the stream is tiny or ink is below `MIN_INK_DOTS` (default 500). Open the PNG and press **⌘L** once so it looks like the physical note.
+
+Use the **exact** PDF you will print (e.g. the same file from BBEdit / Print to PDF). No `lp` in this script — only validation.
+
 ## Installation
 
 1. Clone or download this repository.
