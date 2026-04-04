@@ -1,0 +1,17 @@
+# Built by install.sh / local swiftc before copying to /Library/Printers/
+/pdftonemonic
+
+# Experiment and quality-run output (not part of the shipping driver)
+/lab/
+
+# Scratch files often dropped at repo root during debugging
+/*.pdf
+/*.jpg
+physical-test-packet/
+
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+
+.DS_Store

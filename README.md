@@ -15,6 +15,11 @@ This project completely reverse-engineers the printer's proprietary USB protocol
 * **Sideways Feed Correction**: Because the sticky tape runs along the feed roll (the right-hand side), the physical printer is actually 90 degrees sideways compared to a standard POS receipt printer. The driver automatically maps and rotates all print jobs 90 degrees clockwise so your text *always* reads flawlessly top-to-bottom!
 * **Prints Anything**: Accurately reproduces system fonts, vector graphics, shapes, barcodes, and QR codes natively.
 
+## Developer documentation
+
+* **[docs/technical/developer-guide.md](docs/technical/developer-guide.md)** — CUPS argv/stdin, RGB→gray raster, **correct auto-crop math** (Letter + BBEdit), env vars, and debugging **`error_log`**.
+* **[LEARNINGS.md](LEARNINGS.md)** — Hardware/protocol notes and historical pitfalls.
+
 ## Before you use paper (preflight)
 
 **Never send a job straight to the printer** until a PDF has been checked offline:
@@ -47,8 +52,8 @@ The script will:
 
 1. `unset NEMONIC_PREVIEW_ONLY` (and remove from `~/.zshrc` if set). Preview-only mode sends **zero** bytes to the printer.
 2. `git pull` then **`sudo ./install.sh`** and confirm there is **no ERROR** line.
-3. **`bash diagnose_print.sh`** (no sudo). If it says **MISMATCH**, the Mac is **not** running the repo binary — fix install first. Installed stdout should be **~30k+ bytes** for the built-in test PDF.
-4. Git **baseline**: raster/threshold logic matches merge **`a6b854e`** (2026-04-03). Commits after **~10:40** on 2026-04-04 were experimental; **main** is back on that baseline plus safe plumbing only.
+3. **`bash run_print_gates.sh`** then **`bash diagnose_print.sh`** (no sudo). Installed raster stdout should be **tens of kB** for the built-in test PDF; CUPS **`error_log`** should show the current **`filterBuildTag`** from `pdftonemonic` stderr on real jobs.
+4. For GUI apps (e.g. BBEdit), preflight the **same PDF** you print: **`bash preflight_pdf.sh --open …`**. See the **developer guide** if Letter-sized jobs are blank but small test PDFs work.
 
 ## Uninstallation
 

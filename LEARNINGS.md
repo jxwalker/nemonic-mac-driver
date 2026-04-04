@@ -1,8 +1,6 @@
 # Nemonic MIP-201W macOS Driver: Developer Notes & Learnings
 
-This document serves as a "brain dump" for future development on the native macOS Apple Silicon driver for the Mangoslab Nemonic MIP-201W printer. We went through extensive trial and error to decode the hardware behavior, macOS CUPS quirks, and CoreGraphics matrix math. 
-
-Read this before attempting to fix rotation, mirroring, or auto-crop bugs!
+Read **[docs/technical/developer-guide.md](./docs/technical/developer-guide.md)** first for the current CUPS/PDF pipeline, correct crop math, and debugging checklist. This file keeps **hardware/protocol** facts and **historical** notes that are easy to misremember.
 
 ---
 
@@ -17,33 +15,25 @@ Read this before attempting to fix rotation, mirroring, or auto-crop bugs!
 
 ---
 
-## 2. The Bash Script "Blank Page" Bug (`cgtexttopdf`)
-* **The Symptom**: Printing a plain text file (or piping text) from the terminal via `lpr` prints a massive, blank sheet of paper. However, printing a PDF from BBEdit works perfectly.
-* **The Cause**: macOS CUPS uses a hidden filter called `cgtexttopdf` to handle raw text. When `cgtexttopdf` formats text for the `80x80mm.Fullbleed` page size defined in our PPD, it places the text entirely outside the visible `mediaBox` (or at the absolute bottom margin). 
-* **The Result**: The driver's `Auto-Crop` scanner looks for black pixels, finds none (because they were clipped out of bounds by Apple's filter), falls back to scanning the entire 80x80mm white page, scales it up, and prints a foot-long blank sticky note.
-* **The Fix**: We bypassed `cgtexttopdf` entirely by creating a native Swift CLI tool (`texttopng.swift`) that converts terminal text into a high-res PNG *before* sending it to `lpr`.
+## 2. Plain text, `cgtexttopdf`, and app PDFs (historical + current)
+
+* **Terminal / `lpr` on raw text:** macOS often routes through **`cgtexttopdf`**. For sticky media that filter can place glyphs in awkward relation to the page box; the driver’s auto-crop then sees little or no ink. The **fun_scripts** path builds PDF/PNG another way to avoid that sandbox/font pipeline.
+* **BBEdit and most GUI apps:** Do **not** send raw text to the filter — they spool **`application/pdf`**. Jobs often include **`ColorModel=Gray`** in the options. Two separate issues caused “blank” output in production:
+  1. **Raster:** Drawing some Quartz PDFs **only** into **DeviceGray** can yield an empty first pass; the fix is **DeviceRGB → flatten to gray** (see developer guide).
+  2. **Crop:** **`CGImage.cropping(to:)`** uses Quartz **bottom-left** coordinates; buffer **row 0 is the bottom** of the bitmap. Applying an extra Y “flip” for crop moved the rectangle into **white margins** on **US Letter–sized** pages while body copy sat lower on the sheet — physically blank output. Correct crop uses **`y: minY`** in buffer row space (after padding/clamp), not an inverted formula.
 
 ---
 
-## 3. CoreGraphics Matrix Hell (The "Upside Down & Mirrored" Bug)
-The most difficult part of writing this driver was extracting the bounding box of the text and drawing it rotated without accidentally mirroring it.
+## 3. CoreGraphics: one coordinate system at a time
 
-* **Y-UP vs Y-DOWN**: A raw memory-backed `CGContext` is naturally Y-UP (origin at Bottom-Left). If you render a PDF into it, the image is physically stored Top-Down visually, meaning `y=0` in the array is the bottom of the page.
-* **The Crop Bug**: `CGImage.cropping(to:)` natively expects a Y-DOWN (`Top-Left` origin) rectangle. If you calculate `minY` and `maxY` by scanning a Y-UP array, passing those coordinates to the crop function will literally flip the crop box upside-down. If your text is at the top of the page, the crop box will extract empty white space at the bottom!
-* **The Draw Bug**: If you flip a `CGContext` to be Y-DOWN (`scaleBy(x: 1.0, y: -1.0)`) and then call `CGContext.draw(cgImage)`, CoreGraphics will draw the image **upside down**. An upside-down image rotated 90 degrees geometrically behaves like a **180-degree rotation + a mirror flip**. This is why the user kept seeing "upside down and mirrored" output when we tried to rotate it.
+Y-flips, `scaleBy(y: -1)`, and “invert crop Y” snippets are **context-specific**. A recipe that fixes one stage can break another. When changing rotation or crop:
 
----
-
-## 4. The Blueprint for the Perfect Driver
-To successfully finish the driver, the pipeline **must** strictly adhere to this flow without mixing Apple's coordinate flips:
-
-1. **Pass 1 (Render)**: Use `page.getDrawingTransform` to render the PDF perfectly upright into a standard Y-UP `CGContext`. 
-2. **Pass 2 (Crop)**: Scan the memory array for the text bounds. Since the array is Y-UP, `maxY` is the visual top of the text. Calculate the crop rect for `CGImage.cropping` by inverting the Y-axis mathematically (`cropY = testHeight - 1 - maxY`).
-3. **Pass 3 (Layout)**: Create a `finalContext` (Y-UP). Translate to the center. **Do not use `scale(y: -1)`**. Rotate exactly `-CGFloat.pi / 2.0` (which is 90 degrees Clockwise in a Y-UP system). Draw the cropped image.
-4. **Pass 4 (Byte Packing)**: Because the `finalContext` is Y-UP, Row 0 in the memory array is the *bottom* of the visual image. To ensure the printer prints the top of the text first (so it doesn't get chopped off by the cutting blade), **read the `finalData` array backwards** (`visualY = height - 1 - y`). Do NOT flip the X-axis in software.
+1. Re-run **`bash run_print_gates.sh`** and **`bash preflight_pdf.sh`** on a **Letter-sized** PDF exported from BBEdit (or `cupsfilter` with `-o ColorModel=Gray`), not only the small built-in test PDF.
+2. Use **`NEMONIC_DEBUG_DIR`** and inspect **`rendered`**, **`cropped`**, and **`final-raster`** PNGs when ink disappears.
 
 ---
 
-## 5. Sticky Edge Margins
+## 4. Sticky Edge Margins
+
 The print head is exactly 576 dots (80mm) wide. If you scale text to exactly 576 dots, the top of the letters will print directly onto the sticky adhesive and get clipped by the mechanical edge of the printer. 
-* Always restrict `printableWidth` to **~540 dots**, leaving 36 dots (~4.5mm) of pure white space on the right-hand (sticky) edge.
+* Always restrict `printableWidth` to **~540 dots**, leaving ~36 dots (~4.5mm) of pure white space on the right-hand (sticky) edge.
