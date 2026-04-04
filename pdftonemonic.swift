@@ -128,6 +128,8 @@ func main() {
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
+    // Text printed via macOS (BBEdit, lpr, etc.) can end up outside the nominal mediaBox; 1.0 = old behaviour.
+    let renderPad = max(1.0, min(4.0, envDouble("NEMONIC_RENDER_PAD", default: 2.0)))
     var pdfData: Data
     if args.count >= 7 {
         let path = args[6]
@@ -156,11 +158,14 @@ func main() {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
 
         let box = page.getBoxRect(.mediaBox)
+        let padW = box.width * (renderPad - 1) / 2
+        let padH = box.height * (renderPad - 1) / 2
+        let bigBox = box.insetBy(dx: -padW, dy: -padH)
         let rotation = page.rotationAngle
         let isRotated = (rotation % 180 != 0)
 
-        let pdfWidth = isRotated ? box.height : box.width
-        let pdfHeight = isRotated ? box.width : box.height
+        let pdfWidth = isRotated ? bigBox.height : bigBox.width
+        let pdfHeight = isRotated ? bigBox.width : bigBox.height
 
         let dpiScale: CGFloat = 203.0 / 72.0
         let testWidth = Int(pdfWidth * dpiScale)

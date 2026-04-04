@@ -45,7 +45,7 @@ sudo ./uninstall.sh
 
 1. **Stale or failed install** — Re-run `sudo ./install.sh` and confirm the compile step succeeds. The script uses `xcrun --show-sdk-path`; you need Xcode or Command Line Tools (`xcode-select --install`).
 2. **`NEMONIC_PREVIEW_ONLY` set** — If this env var is `1`/`true`/ `yes`, the filter writes **no** bytes to stdout (preview-only). Unset it for normal printing (check shells, IDE run configs, or `launchctl` if you ever exported it globally).
-3. **Plain text / bad PDF from CUPS** — If you print **text** (not PDF), macOS may build a PDF where marks sit outside `mediaBox`; the driver then sees an all-white page (see `LEARNINGS.md`, §2). Prefer **Print to PDF** then print that PDF, or use the fun scripts’ PDF path.
+3. **BBEdit / plain text through the print dialog** — macOS sometimes puts text **outside** the page’s `mediaBox` in the generated PDF. The driver now **renders a larger window** around the page by default (`NEMONIC_RENDER_PAD`, default `2`). If you still get blanks, set `3` or `4` in the environment for the filter, or use **File → Print… → PDF → Save as PDF** and print that file.
 4. **Confirm the filter** — From the repo: `bash test.sh` should show non-zero “Ink” and open a preview PNG. If that fails, the problem is local PDF/render, not the printer.
 5. **CUPS errors** — Inspect `/var/log/cups/` or print a job and check Console; the filter logs to stderr when it emits **zero** pages or when the job PDF is empty.
 
