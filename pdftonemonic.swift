@@ -83,6 +83,15 @@ func makeImage(from rawData: [UInt8], width: Int, height: Int) -> CGImage? {
                    intent: .defaultIntent)
 }
 
+/// Black dots in 1-bit buffer (value 0 = burn on thermal).
+func blackDotCount(_ mono: [UInt8]) -> Int {
+    var n = 0
+    for v in mono where v == 0 {
+        n += 1
+    }
+    return n
+}
+
 func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> (Data, [UInt8]) {
     var monoData = [UInt8](repeating: 255, count: width * height)
     let threshold = envInt("NEMONIC_THRESHOLD", default: 160)
@@ -126,10 +135,9 @@ func main() {
     let previewOnly = shouldPreviewOnly()
     let cropPadding = max(0, envInt("NEMONIC_CROP_PADDING", default: 16))
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
+    let minInkDots = max(0, envInt("NEMONIC_MIN_INK_DOTS", default: 400))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
-    // Text printed via macOS (BBEdit, lpr, etc.) can end up outside the nominal mediaBox; 1.0 = old behaviour.
-    let renderPad = max(1.0, min(4.0, envDouble("NEMONIC_RENDER_PAD", default: 2.0)))
     var pdfData: Data
     if args.count >= 7 {
         let path = args[6]
@@ -143,13 +151,13 @@ func main() {
     }
 
     if pdfData.isEmpty {
-        fputs("pdftonemonic: no PDF bytes (empty argv path or stdin).\n", stderr)
+        fputs("pdftonemonic: no PDF data.\n", stderr)
         exit(1)
     }
 
     guard let provider = CGDataProvider(data: pdfData as CFData),
           let pdfDoc = CGPDFDocument(provider) else {
-        fputs("pdftonemonic: could not open PDF from job data.\n", stderr)
+        fputs("pdftonemonic: invalid PDF.\n", stderr)
         exit(1)
     }
 
@@ -158,58 +166,39 @@ func main() {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
 
         let box = page.getBoxRect(.mediaBox)
-        let padW = box.width * (renderPad - 1) / 2
-        let padH = box.height * (renderPad - 1) / 2
-        let bigBox = box.insetBy(dx: -padW, dy: -padH)
         let rotation = page.rotationAngle
         let isRotated = (rotation % 180 != 0)
 
-        let pdfWidth = isRotated ? bigBox.height : bigBox.width
-        let pdfHeight = isRotated ? bigBox.width : bigBox.height
+        let pdfWidth = isRotated ? box.height : box.width
+        let pdfHeight = isRotated ? box.width : box.height
 
         let dpiScale: CGFloat = 203.0 / 72.0
         let testWidth = Int(pdfWidth * dpiScale)
         let testHeight = Int(pdfHeight * dpiScale)
 
-        // Render into DeviceRGB first: some PDFs (transparency / blend) rasterize empty in DeviceGray.
-        let colorSpaceRGB = CGColorSpaceCreateDeviceRGB()
-        let bmpRGB = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-        var testDataRGB = [UInt8](repeating: 0, count: max(1, testWidth * testHeight * 4))
-        guard let rgbContext = CGContext(data: &testDataRGB,
-                                         width: testWidth,
-                                         height: testHeight,
-                                         bitsPerComponent: 8,
-                                         bytesPerRow: testWidth * 4,
-                                         space: colorSpaceRGB,
-                                         bitmapInfo: bmpRGB) else { continue }
-
-        rgbContext.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
-        rgbContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
-
-        rgbContext.translateBy(x: 0, y: CGFloat(testHeight))
-        rgbContext.scaleBy(x: dpiScale, y: -dpiScale)
-
-        rgbContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        rgbContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        rgbContext.translateBy(x: -box.midX, y: -box.midY)
-
-        rgbContext.drawPDFPage(page)
-        guard let rgbImage = rgbContext.makeImage() else { continue }
-
-        var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
         let colorSpace = CGColorSpaceCreateDeviceGray()
-        guard let grayRaster = CGContext(data: &testData,
-                                         width: testWidth,
-                                         height: testHeight,
-                                         bitsPerComponent: 8,
-                                         bytesPerRow: testWidth,
-                                         space: colorSpace,
-                                         bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
-        grayRaster.interpolationQuality = interpolationQuality
-        grayRaster.draw(rgbImage, in: CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
-        guard let testImage = grayRaster.makeImage() else { continue }
-        saveDebugImage(rgbImage, pageNum: pageNum, stage: "rendered-rgb", directory: debugDir)
-        saveDebugImage(testImage, pageNum: pageNum, stage: "rendered-gray", directory: debugDir)
+        var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
+        guard let testContext = CGContext(data: &testData,
+                                          width: testWidth,
+                                          height: testHeight,
+                                          bitsPerComponent: 8,
+                                          bytesPerRow: testWidth,
+                                          space: colorSpace,
+                                          bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
+
+        testContext.setFillColor(CGColor.white)
+        testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
+
+        testContext.translateBy(x: 0, y: CGFloat(testHeight))
+        testContext.scaleBy(x: dpiScale, y: -dpiScale)
+
+        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        testContext.translateBy(x: -box.midX, y: -box.midY)
+
+        testContext.drawPDFPage(page)
+        guard let testImage = testContext.makeImage() else { continue }
+        saveDebugImage(testImage, pageNum: pageNum, stage: "rendered", directory: debugDir)
 
         var minX = testWidth
         var maxX = 0
@@ -255,16 +244,13 @@ func main() {
             finalScale = maxRenderScale
         }
 
-        // Scaled size in PDF pixel space (before +90° rotation into the head bitmap).
         var drawWidth = CGFloat(croppedImage.width) * finalScale
         var drawHeight = CGFloat(croppedImage.height) * finalScale
-        // After rotation, the span along the 576-dot scan axis must not exceed printable width.
         if drawHeight > CGFloat(printableWidth) {
             finalScale *= CGFloat(printableWidth) / drawHeight
             drawWidth = CGFloat(croppedImage.width) * finalScale
             drawHeight = CGFloat(croppedImage.height) * finalScale
         }
-        // Buffer height must cover the rotated AABB; using only width×scale clips tall spans → all-white output.
         let targetHeight = Int(ceil(max(drawWidth, drawHeight))) + feedPaddingDots + 64
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
@@ -298,6 +284,13 @@ func main() {
             saveDebugImage(monoImage, pageNum: pageNum, stage: "dithered", directory: debugDir)
         }
 
+        let ink = blackDotCount(monoData)
+        if !previewOnly && minInkDots > 0 && ink < minInkDots {
+            let msg = "pdftonemonic: page \(pageNum) skipped — only \(ink) black dots (min \(minInkDots)); refusing blank raster. Set NEMONIC_DEBUG_DIR for PNGs.\n"
+            if let data = msg.data(using: .utf8) { FileHandle.standardError.write(data) }
+            continue
+        }
+
         if !previewOnly {
             FileHandle.standardOutput.write(escposData)
             pagesEmitted += 1
@@ -305,10 +298,8 @@ func main() {
     }
 
     if !previewOnly && pagesEmitted == 0 {
-        let msg = "pdftonemonic: wrote 0 pages (empty PDF, render failure, or all pages skipped). Set NEMONIC_DEBUG_DIR to capture PNGs.\n"
-        if let data = msg.data(using: .utf8) {
-            FileHandle.standardError.write(data)
-        }
+        fputs("pdftonemonic: no pages sent to printer (all blank or errors). Job fails.\n", stderr)
+        exit(1)
     }
 }
 

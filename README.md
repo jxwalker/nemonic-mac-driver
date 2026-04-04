@@ -41,13 +41,17 @@ sudo ./uninstall.sh
 
 ## Troubleshooting
 
-**Blank labels (feeds paper but no image)** — usually one of:
+**Driver** — Single threshold dither (same class of pipeline as pre–quality-experiment builds), plus a **taller raster** so rotation does not clip all ink to white.
 
-1. **Stale or failed install** — Re-run `sudo ./install.sh` and confirm the compile step succeeds. The script uses `xcrun --show-sdk-path`; you need Xcode or Command Line Tools (`xcode-select --install`).
-2. **`NEMONIC_PREVIEW_ONLY` set** — If this env var is `1`/`true`/ `yes`, the filter writes **no** bytes to stdout (preview-only). Unset it for normal printing (check shells, IDE run configs, or `launchctl` if you ever exported it globally).
-3. **BBEdit / plain text through the print dialog** — macOS sometimes puts text **outside** the page’s `mediaBox` in the generated PDF. The driver now **renders a larger window** around the page by default (`NEMONIC_RENDER_PAD`, default `2`). If you still get blanks, set `3` or `4` in the environment for the filter, or use **File → Print… → PDF → Save as PDF** and print that file.
-4. **Confirm the filter** — From the repo: `bash test.sh` should show non-zero “Ink” and open a preview PNG. If that fails, the problem is local PDF/render, not the printer.
-5. **CUPS errors** — Inspect `/var/log/cups/` or print a job and check Console; the filter logs to stderr when it emits **zero** pages or when the job PDF is empty.
+**Blank job rejected** — Before sending to the printer, the filter counts black dots in the 1-bit raster. If there are fewer than **`NEMONIC_MIN_INK_DOTS`** (default **400**), it **does not** print that page and logs to stderr (CUPS job should **fail** instead of wasting a blank note). Set to **`0`** only if you truly need to allow nearly empty pages.
+
+**Other checks:**
+
+1. Re-run **`sudo ./install.sh`** after `git pull`.
+2. Unset **`NEMONIC_PREVIEW_ONLY`** for real printing.
+3. **`bash test.sh`** — must show non-zero Ink; opens a preview PNG.
+4. **BBEdit / plain text** — if macOS builds a PDF with no marks in-frame (see `LEARNINGS.md` §2), use **Print → PDF → Save as PDF**, then print the PDF.
+5. CUPS logs: **`/var/log/cups/`** — look for `pdftonemonic:` lines on stderr.
 
 ## How it works (Protocol Technicals)
 During the reverse-engineering process, we discovered the printer accepts a slight variation of the standard ESC/POS protocol (`GS v 0`) wrapped in specific start/end bytes:
