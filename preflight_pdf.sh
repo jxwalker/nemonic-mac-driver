@@ -65,7 +65,7 @@ if ! swiftc "$FILTER_SRC" -o "$TMP/pdftonemonic" 2>"$COMPILE_LOG"; then
 fi
 
 FILT_LOG="$TMP/filter.log"
-if ! "$TMP/pdftonemonic" 1 preflight user 1 "" "$TEST_PDF" >"$TEST_BIN" 2>"$FILT_LOG"; then
+if ! "$TMP/pdftonemonic" 1 preflight user 1 "" "$TEST_PDF" < /dev/null >"$TEST_BIN" 2>"$FILT_LOG"; then
   echo "preflight: filter exited non-zero"
   cat "$FILT_LOG"
   exit 1
