@@ -66,7 +66,7 @@ echo ""
 echo "[3/4] Running filter..."
 FILTER_LOG="$TMP/filter.log"
 if ! "$TMP/pdftonemonic" "1" "testuser" "nemonic-test" "1" "" "$TEST_PDF" \
-        > "$TEST_BIN" 2>"$FILTER_LOG"; then
+        < /dev/null > "$TEST_BIN" 2>"$FILTER_LOG"; then
     echo "✗ FAIL: Filter crashed"
     echo "────────────────────────────────────────"
     cat "$FILTER_LOG"
@@ -133,4 +133,5 @@ echo "║     → scale cap too low or wrong axis     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-open "$TEST_PNG" 2>/dev/null || echo "(Could not auto-open — open manually: $TEST_PNG)"
+(open "$TEST_PNG" 2>/dev/null || true) &
+echo "(Preview: $TEST_PNG — open manually if needed)"

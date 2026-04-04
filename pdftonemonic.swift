@@ -1,9 +1,29 @@
 import Foundation
 import CoreGraphics
 import AppKit
+import Darwin
+
+/// Load PDF bytes for a CUPS job. Order matters: pipes first when safe; never block on a TTY stdin.
+func loadJobPDF(arguments args: [String]) -> Data? {
+    if isatty(STDIN_FILENO) == 0 {
+        let fromStdin = FileHandle.standardInput.readDataToEndOfFile()
+        if !fromStdin.isEmpty { return fromStdin }
+    }
+    if args.count >= 7 {
+        let p = args[6]
+        if !p.isEmpty && p != "-" {
+            if let d = try? Data(contentsOf: URL(fileURLWithPath: p)), !d.isEmpty {
+                return d
+            }
+        }
+    }
+    return nil
+}
 
 let maxRenderScale: CGFloat = 2.0
 let feedPaddingDots = 60
+/// Logged once per job to /private/var/log/cups/error_log (confirms install is current).
+private let filterBuildTag = "pdftonemonic build 2026-04-04-crop-bottom-origin"
 
 func debugDirectoryURL() -> URL? {
     guard let path = ProcessInfo.processInfo.environment["NEMONIC_DEBUG_DIR"],
@@ -83,9 +103,16 @@ func makeImage(from rawData: [UInt8], width: Int, height: Int) -> CGImage? {
                    intent: .defaultIntent)
 }
 
+func ditherThreshold() -> Int {
+    let t = envInt("NEMONIC_THRESHOLD", default: 160)
+    if (1...255).contains(t) { return t }
+    fputs("pdftonemonic: NEMONIC_THRESHOLD=\(t) is outside 1...255 (0 = all-white blank); using 160.\n", stderr)
+    return 160
+}
+
 func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> (Data, [UInt8]) {
     var monoData = [UInt8](repeating: 255, count: width * height)
-    let threshold = envInt("NEMONIC_THRESHOLD", default: 160)
+    let threshold = ditherThreshold()
     var out = Data()
     out.append(contentsOf: [0x02])
     out.append(contentsOf: [0x1B, 0x40])
@@ -124,22 +151,17 @@ func main() {
     let args = CommandLine.arguments
     let debugDir = debugDirectoryURL()
     let previewOnly = shouldPreviewOnly()
+    fputs("\(filterBuildTag)\n", stderr)
+    if previewOnly {
+        fputs("pdftonemonic: NEMONIC_PREVIEW_ONLY is set — stdout will carry no ESC/POS (blank sheet if backend still feeds paper).\n", stderr)
+    }
+    var pagesSentToPrinter = 0
     let cropPadding = max(0, envInt("NEMONIC_CROP_PADDING", default: 16))
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
-    // CUPS on macOS often puts the real PDF on stdin; argv[6] may point at an empty or stale temp file.
-    // Reading the file first caused real jobs to use 0-byte input → blank notes. Stdin wins when non-empty.
-    var pdfData = FileHandle.standardInput.readDataToEndOfFile()
-    if pdfData.isEmpty, args.count >= 7 {
-        let p = args[6]
-        if !p.isEmpty && p != "-" {
-            pdfData = (try? Data(contentsOf: URL(fileURLWithPath: p))) ?? Data()
-        }
-    }
-
-    if pdfData.isEmpty {
-        fputs("pdftonemonic: no PDF bytes.\n", stderr)
+    guard let pdfData = loadJobPDF(arguments: args), !pdfData.isEmpty else {
+        fputs("pdftonemonic: no PDF bytes (if running by hand with a file path, use: ... < /dev/null or pass a valid argv[6]).\n", stderr)
         exit(1)
     }
 
@@ -149,7 +171,13 @@ func main() {
         exit(1)
     }
 
-    for pageNum in 1...pdfDoc.numberOfPages {
+    let pageCount = pdfDoc.numberOfPages
+    guard pageCount > 0 else {
+        fputs("pdftonemonic: PDF has no pages.\n", stderr)
+        exit(1)
+    }
+
+    for pageNum in 1...pageCount {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
 
         let box = page.getBoxRect(.mediaBox)
@@ -163,28 +191,45 @@ func main() {
         let testWidth = Int(pdfWidth * dpiScale)
         let testHeight = Int(pdfHeight * dpiScale)
 
+        // Render PDF into DeviceRGB first: some jobs (BBEdit / Quartz, transparency blends)
+        // rasterize as empty white in a direct DeviceGray+drawPDFPage pass.
+        let colorSpaceRGB = CGColorSpaceCreateDeviceRGB()
+        let bmpRGB = CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+        var testDataRGB = [UInt8](repeating: 0, count: max(1, testWidth * testHeight * 4))
+        guard let rgbContext = CGContext(data: &testDataRGB,
+                                         width: testWidth,
+                                         height: testHeight,
+                                         bitsPerComponent: 8,
+                                         bytesPerRow: testWidth * 4,
+                                         space: colorSpaceRGB,
+                                         bitmapInfo: bmpRGB) else { continue }
+
+        rgbContext.setFillColor(red: 1, green: 1, blue: 1, alpha: 1)
+        rgbContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
+
+        rgbContext.translateBy(x: 0, y: CGFloat(testHeight))
+        rgbContext.scaleBy(x: dpiScale, y: -dpiScale)
+
+        rgbContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
+        rgbContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
+        rgbContext.translateBy(x: -box.midX, y: -box.midY)
+
+        rgbContext.drawPDFPage(page)
+        guard let rgbImage = rgbContext.makeImage() else { continue }
+
         let colorSpace = CGColorSpaceCreateDeviceGray()
         var testData = [UInt8](repeating: 255, count: testWidth * testHeight)
-        guard let testContext = CGContext(data: &testData,
-                                          width: testWidth,
-                                          height: testHeight,
-                                          bitsPerComponent: 8,
-                                          bytesPerRow: testWidth,
-                                          space: colorSpace,
-                                          bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
-
-        testContext.setFillColor(CGColor.white)
-        testContext.fill(CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
-
-        testContext.translateBy(x: 0, y: CGFloat(testHeight))
-        testContext.scaleBy(x: dpiScale, y: -dpiScale)
-
-        testContext.translateBy(x: pdfWidth / 2.0, y: pdfHeight / 2.0)
-        testContext.rotate(by: -CGFloat(rotation) * .pi / 180.0)
-        testContext.translateBy(x: -box.midX, y: -box.midY)
-
-        testContext.drawPDFPage(page)
-        guard let testImage = testContext.makeImage() else { continue }
+        guard let grayRaster = CGContext(data: &testData,
+                                         width: testWidth,
+                                         height: testHeight,
+                                         bitsPerComponent: 8,
+                                         bytesPerRow: testWidth,
+                                         space: colorSpace,
+                                         bitmapInfo: CGImageAlphaInfo.none.rawValue) else { continue }
+        grayRaster.interpolationQuality = interpolationQuality
+        grayRaster.draw(rgbImage, in: CGRect(x: 0, y: 0, width: testWidth, height: testHeight))
+        guard let testImage = grayRaster.makeImage() else { continue }
+        saveDebugImage(rgbImage, pageNum: pageNum, stage: "rendered-rgb", directory: debugDir)
         saveDebugImage(testImage, pageNum: pageNum, stage: "rendered", directory: debugDir)
 
         var minX = testWidth
@@ -210,12 +255,11 @@ func main() {
             maxX = min(testWidth - 1, maxX + padding)
             maxY = min(testHeight - 1, maxY + padding)
 
-            let invertedMinY = testHeight - 1 - maxY
-            let invertedMaxY = testHeight - 1 - minY
+            // CGImage.cropping uses Quartz coords: origin bottom-left; buffer row 0 is y=0.
             cropRect = CGRect(x: minX,
-                              y: invertedMinY,
+                              y: minY,
                               width: maxX - minX + 1,
-                              height: invertedMaxY - invertedMinY + 1)
+                              height: maxY - minY + 1)
         }
 
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
@@ -274,7 +318,13 @@ func main() {
 
         if !previewOnly {
             FileHandle.standardOutput.write(escposData)
+            pagesSentToPrinter += 1
         }
+    }
+
+    if !previewOnly && pagesSentToPrinter == 0 {
+        fputs("pdftonemonic: no ESC/POS emitted — every page failed render/crop (would look blank).\n", stderr)
+        exit(1)
     }
 }
 

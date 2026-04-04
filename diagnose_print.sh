@@ -6,6 +6,8 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 INSTALLED="/Library/Printers/Nemonic/pdftonemonic"
+# CUPS filter argv: job user title copies options file (matches test.sh / run_print_gates.sh)
+CUPS_ARGS=("1" "testuser" "nemonic-diagnose" "1" "")
 TMPD="$(mktemp -d)"
 cleanup() { rm -rf "$TMPD"; }
 trap cleanup EXIT
@@ -42,11 +44,11 @@ echo "--- Raster byte count (canonical test PDF) ---"
 PDF="$TMPD/t.pdf"
 swift "$REPO/make_test_pdf.swift" "$PDF"
 if [[ -n "${FRESH_B:-}" ]]; then
-  BYTES_F=$("$FRESH_B" 1 u t 1 "" "$PDF" | wc -c | tr -d ' ')
+  BYTES_F=$("$FRESH_B" "${CUPS_ARGS[@]}" "$PDF" < /dev/null | wc -c | tr -d ' ')
   echo "Fresh build stdout: $BYTES_F bytes"
 fi
 if [[ -x "$INSTALLED" ]]; then
-  BYTES_I=$("$INSTALLED" 1 u t 1 "" "$PDF" | wc -c | tr -d ' ')
+  BYTES_I=$("$INSTALLED" "${CUPS_ARGS[@]}" "$PDF" < /dev/null | wc -c | tr -d ' ')
   echo "Installed stdout:   $BYTES_I bytes"
 fi
 
