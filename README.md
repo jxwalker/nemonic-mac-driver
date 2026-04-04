@@ -39,20 +39,6 @@ To completely remove the driver and printer queue from your system:
 sudo ./uninstall.sh
 ```
 
-## Troubleshooting
-
-**Driver** — Single threshold dither (same class of pipeline as pre–quality-experiment builds), plus a **taller raster** so rotation does not clip all ink to white.
-
-**Blank job rejected** — Before sending to the printer, the filter counts black dots in the 1-bit raster. If there are fewer than **`NEMONIC_MIN_INK_DOTS`** (default **400**), it **does not** print that page and logs to stderr (CUPS job should **fail** instead of wasting a blank note). Set to **`0`** only if you truly need to allow nearly empty pages.
-
-**Other checks:**
-
-1. Re-run **`sudo ./install.sh`** after `git pull`.
-2. Unset **`NEMONIC_PREVIEW_ONLY`** for real printing.
-3. **`bash test.sh`** — must show non-zero Ink; opens a preview PNG.
-4. **BBEdit / plain text** — if macOS builds a PDF with no marks in-frame (see `LEARNINGS.md` §2), use **Print → PDF → Save as PDF**, then print the PDF.
-5. CUPS logs: **`/var/log/cups/`** — look for `pdftonemonic:` lines on stderr.
-
 ## How it works (Protocol Technicals)
 During the reverse-engineering process, we discovered the printer accepts a slight variation of the standard ESC/POS protocol (`GS v 0`) wrapped in specific start/end bytes:
 1. **Header**: `STX (0x02)`, `ESC @` (Initialize)

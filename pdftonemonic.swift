@@ -83,15 +83,6 @@ func makeImage(from rawData: [UInt8], width: Int, height: Int) -> CGImage? {
                    intent: .defaultIntent)
 }
 
-/// Black dots in 1-bit buffer (value 0 = burn on thermal).
-func blackDotCount(_ mono: [UInt8]) -> Int {
-    var n = 0
-    for v in mono where v == 0 {
-        n += 1
-    }
-    return n
-}
-
 func ditherAndPrint(rawData: [UInt8], width: Int, height: Int) -> (Data, [UInt8]) {
     var monoData = [UInt8](repeating: 255, count: width * height)
     let threshold = envInt("NEMONIC_THRESHOLD", default: 160)
@@ -135,33 +126,18 @@ func main() {
     let previewOnly = shouldPreviewOnly()
     let cropPadding = max(0, envInt("NEMONIC_CROP_PADDING", default: 16))
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
-    let minInkDots = max(0, envInt("NEMONIC_MIN_INK_DOTS", default: 400))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
     var pdfData: Data
     if args.count >= 7 {
-        let path = args[6]
-        if path.isEmpty || path == "-" {
-            pdfData = FileHandle.standardInput.readDataToEndOfFile()
-        } else {
-            pdfData = (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data()
-        }
+        pdfData = try! Data(contentsOf: URL(fileURLWithPath: args[6]))
     } else {
         pdfData = FileHandle.standardInput.readDataToEndOfFile()
     }
 
-    if pdfData.isEmpty {
-        fputs("pdftonemonic: no PDF data.\n", stderr)
-        exit(1)
-    }
-
     guard let provider = CGDataProvider(data: pdfData as CFData),
-          let pdfDoc = CGPDFDocument(provider) else {
-        fputs("pdftonemonic: invalid PDF.\n", stderr)
-        exit(1)
-    }
+          let pdfDoc = CGPDFDocument(provider) else { exit(1) }
 
-    var pagesEmitted = 0
     for pageNum in 1...pdfDoc.numberOfPages {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
 
@@ -238,20 +214,14 @@ func main() {
         let printableWidth = targetWidth - rightMargin
 
         let contentWidth = croppedImage.height
+        let contentHeight = croppedImage.width
 
         var finalScale = (CGFloat(printableWidth) / CGFloat(contentWidth)) * CGFloat(scaleAdjust)
         if finalScale > maxRenderScale {
             finalScale = maxRenderScale
         }
 
-        var drawWidth = CGFloat(croppedImage.width) * finalScale
-        var drawHeight = CGFloat(croppedImage.height) * finalScale
-        if drawHeight > CGFloat(printableWidth) {
-            finalScale *= CGFloat(printableWidth) / drawHeight
-            drawWidth = CGFloat(croppedImage.width) * finalScale
-            drawHeight = CGFloat(croppedImage.height) * finalScale
-        }
-        let targetHeight = Int(ceil(max(drawWidth, drawHeight))) + feedPaddingDots + 64
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPaddingDots
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -270,6 +240,8 @@ func main() {
         finalContext.scaleBy(x: 1.0, y: -1.0)
         finalContext.rotate(by: CGFloat.pi / 2.0)
 
+        let drawWidth = CGFloat(croppedImage.width) * finalScale
+        let drawHeight = CGFloat(croppedImage.height) * finalScale
         finalContext.draw(croppedImage,
                           in: CGRect(x: -drawWidth / 2.0,
                                      y: -drawHeight / 2.0,
@@ -284,22 +256,9 @@ func main() {
             saveDebugImage(monoImage, pageNum: pageNum, stage: "dithered", directory: debugDir)
         }
 
-        let ink = blackDotCount(monoData)
-        if !previewOnly && minInkDots > 0 && ink < minInkDots {
-            let msg = "pdftonemonic: page \(pageNum) skipped — only \(ink) black dots (min \(minInkDots)); refusing blank raster. Set NEMONIC_DEBUG_DIR for PNGs.\n"
-            if let data = msg.data(using: .utf8) { FileHandle.standardError.write(data) }
-            continue
-        }
-
         if !previewOnly {
             FileHandle.standardOutput.write(escposData)
-            pagesEmitted += 1
         }
-    }
-
-    if !previewOnly && pagesEmitted == 0 {
-        fputs("pdftonemonic: no pages sent to printer (all blank or errors). Job fails.\n", stderr)
-        exit(1)
     }
 }
 
