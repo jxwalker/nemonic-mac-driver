@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SDK_PATH="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+SDK_PATH="$(xcrun --show-sdk-path 2>/dev/null || true)"
 MODULE_CACHE_PATH="/tmp/nemonic-clang-module-cache"
 
 echo "Nemonic MIP-201W Native macOS Driver Installer"
@@ -13,9 +13,21 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "1. Compiling Swift driver (Apple Silicon Native)..."
+if [ -z "$SDK_PATH" ] || [ ! -d "$SDK_PATH" ]; then
+  echo "ERROR: No macOS SDK. Run: xcode-select --install"
+  exit 1
+fi
+
+echo "1. Compiling Swift driver (SDK: $SDK_PATH)..."
 mkdir -p "$MODULE_CACHE_PATH"
 CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH" swiftc -sdk "$SDK_PATH" "$DIR/pdftonemonic.swift" -o "$DIR/pdftonemonic" -O
+
+BIN_BYTES=$(wc -c <"$DIR/pdftonemonic" | tr -d ' ')
+if [ "$BIN_BYTES" -lt 10000 ]; then
+  echo "ERROR: compile produced tiny binary ($BIN_BYTES bytes) — not installing."
+  exit 1
+fi
+echo "   (binary $BIN_BYTES bytes)"
 
 echo "2. Installing CUPS filter to /Library/Printers/Nemonic..."
 mkdir -p /Library/Printers/Nemonic

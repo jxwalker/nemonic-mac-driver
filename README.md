@@ -26,10 +26,12 @@ sudo ./install.sh
 ```
 
 The script will:
-* Compile the Swift driver into a native binary.
-* Install the binary to the correct CUPS `/Library/Printers/Nemonic/` path.
-* Install the patched, 100% marginless (Fullbleed) PostScript Printer Description (PPD) file.
-* Automatically detect your printer via USB and add it to your system.
+* Compile the Swift driver with `xcrun --show-sdk-path` (needs Command Line Tools or Xcode).
+* Abort if the compiled binary is suspiciously small (so a failed compile never replaces a good filter).
+* Install the binary to `/Library/Printers/Nemonic/`.
+* Install the patched full-bleed PPD and optionally add the USB queue.
+
+If notes are **blank**, the usual cause is **`install.sh` never successfully updated** the system filter (wrong SDK path) or **`NEMONIC_PREVIEW_ONLY`** is set. Run `bash verify_print.sh` after install, and unset preview env vars.
 
 ## Uninstallation
 
