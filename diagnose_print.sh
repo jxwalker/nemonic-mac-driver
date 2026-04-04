@@ -58,9 +58,14 @@ lpstat -v 2>/dev/null | grep -i nemonic || true
 echo ""
 if [[ -n "${FRESH_B:-}" && -x "$INSTALLED" ]]; then
   if cmp -s "$FRESH_B" "$INSTALLED"; then
-    echo "RESULT: Installed binary MATCHES fresh build."
+    echo "RESULT: Installed binary is byte-identical to fresh build."
   else
-    echo "RESULT: *** MISMATCH *** Run: sudo ./install.sh (installed filter is NOT current repo)."
+    echo "RESULT: Binaries differ on disk (timestamps/paths); compare test output above."
+    if [[ -n "${BYTES_F:-}" && -n "${BYTES_I:-}" && "$BYTES_F" == "$BYTES_I" ]]; then
+      echo "RESULT: Same raster byte count from fresh + installed for test PDF — filter behaviour likely matches."
+    else
+      echo "RESULT: *** Run: sudo ./install.sh from latest main ***"
+    fi
   fi
 fi
 if [[ -n "${BYTES_I:-}" && "${BYTES_I:-0}" -lt 15000 ]]; then
