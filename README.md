@@ -31,7 +31,12 @@ The script will:
 * Install the binary to `/Library/Printers/Nemonic/`.
 * Install the patched full-bleed PPD and optionally add the USB queue.
 
-If notes are **blank**, the usual cause is **`install.sh` never successfully updated** the system filter (wrong SDK path) or **`NEMONIC_PREVIEW_ONLY`** is set. Run `bash verify_print.sh` after install, and unset preview env vars.
+**Blank pages — do this in order**
+
+1. `unset NEMONIC_PREVIEW_ONLY` (and remove from `~/.zshrc` if set). Preview-only mode sends **zero** bytes to the printer.
+2. `git pull` then **`sudo ./install.sh`** and confirm there is **no ERROR** line.
+3. **`bash diagnose_print.sh`** (no sudo). If it says **MISMATCH**, the Mac is **not** running the repo binary — fix install first. Installed stdout should be **~30k+ bytes** for the built-in test PDF.
+4. Git **baseline**: raster/threshold logic matches merge **`a6b854e`** (2026-04-03). Commits after **~10:40** on 2026-04-04 were experimental; **main** is back on that baseline plus safe plumbing only.
 
 ## Uninstallation
 

@@ -128,6 +128,7 @@ func main() {
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
+    // Plumbing only (does not change raster math): match merge a6b854e for PDF render; avoid try! and empty job file.
     var pdfData = Data()
     if args.count >= 7 {
         let p = args[6]
@@ -143,13 +144,13 @@ func main() {
     }
 
     if pdfData.isEmpty {
-        fputs("pdftonemonic: no PDF (empty file or stdin).\n", stderr)
+        fputs("pdftonemonic: no PDF bytes.\n", stderr)
         exit(1)
     }
 
     guard let provider = CGDataProvider(data: pdfData as CFData),
           let pdfDoc = CGPDFDocument(provider) else {
-        fputs("pdftonemonic: not a valid PDF.\n", stderr)
+        fputs("pdftonemonic: invalid PDF.\n", stderr)
         exit(1)
     }
 
@@ -229,20 +230,14 @@ func main() {
         let printableWidth = targetWidth - rightMargin
 
         let contentWidth = croppedImage.height
+        let contentHeight = croppedImage.width
 
         var finalScale = (CGFloat(printableWidth) / CGFloat(contentWidth)) * CGFloat(scaleAdjust)
         if finalScale > maxRenderScale {
             finalScale = maxRenderScale
         }
 
-        var drawWidth = CGFloat(croppedImage.width) * finalScale
-        var drawHeight = CGFloat(croppedImage.height) * finalScale
-        if drawHeight > CGFloat(printableWidth) {
-            finalScale *= CGFloat(printableWidth) / drawHeight
-            drawWidth = CGFloat(croppedImage.width) * finalScale
-            drawHeight = CGFloat(croppedImage.height) * finalScale
-        }
-        let targetHeight = Int(ceil(max(drawWidth, drawHeight))) + feedPaddingDots + 64
+        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPaddingDots
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -261,6 +256,8 @@ func main() {
         finalContext.scaleBy(x: 1.0, y: -1.0)
         finalContext.rotate(by: CGFloat.pi / 2.0)
 
+        let drawWidth = CGFloat(croppedImage.width) * finalScale
+        let drawHeight = CGFloat(croppedImage.height) * finalScale
         finalContext.draw(croppedImage,
                           in: CGRect(x: -drawWidth / 2.0,
                                      y: -drawHeight / 2.0,
