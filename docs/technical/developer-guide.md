@@ -75,7 +75,7 @@ On startup the filter prints **`filterBuildTag`** to **stderr** so `/private/var
 
 | Script | Role |
 |--------|------|
-| `run_print_gates.sh` | Compile → file + `/dev/null` → stdin `-"` pipeline → ink count → optional installed binary byte check. |
+| `run_print_gates.sh` | Compile → file + `/dev/null` → stdin pipe with sixth arg `-` (stdin PDF) → ink count → optional installed binary byte check. |
 | `test.sh` | Canonical PDF + preview PNG + human checklist. |
 | `preflight_pdf.sh [file]` | Your real PDF; fails on low byte count or low ink. |
 | `diagnose_print.sh` | Installed vs fresh `swiftc` binary, shasum, raster byte count. |
