@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-SDK_PATH="/Library/Developer/CommandLineTools/SDKs/MacOSX26.sdk"
+SDK_PATH="$(xcrun --show-sdk-path 2>/dev/null || true)"
 MODULE_CACHE_PATH="/tmp/nemonic-clang-module-cache"
 
 echo "Nemonic MIP-201W Native macOS Driver Installer"
@@ -13,7 +13,12 @@ if [ "$EUID" -ne 0 ]; then
   exit 1
 fi
 
-echo "1. Compiling Swift driver (Apple Silicon Native)..."
+if [ -z "$SDK_PATH" ] || [ ! -d "$SDK_PATH" ]; then
+  echo "No macOS SDK found. Install Command Line Tools: xcode-select --install"
+  exit 1
+fi
+
+echo "1. Compiling Swift driver ($(uname -m))..."
 mkdir -p "$MODULE_CACHE_PATH"
 CLANG_MODULE_CACHE_PATH="$MODULE_CACHE_PATH" swiftc -sdk "$SDK_PATH" "$DIR/pdftonemonic.swift" -o "$DIR/pdftonemonic" -O
 

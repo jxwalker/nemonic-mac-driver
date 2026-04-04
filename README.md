@@ -39,6 +39,15 @@ To completely remove the driver and printer queue from your system:
 sudo ./uninstall.sh
 ```
 
+## Troubleshooting
+
+**Blank labels (feeds paper but no image)** — usually one of:
+
+1. **Stale or failed install** — Re-run `sudo ./install.sh` and confirm the compile step succeeds. The script uses `xcrun --show-sdk-path`; you need Xcode or Command Line Tools (`xcode-select --install`).
+2. **`NEMONIC_PREVIEW_ONLY` set** — If this env var is `1`/`true`/ `yes`, the filter writes **no** bytes to stdout (preview-only). Unset it for normal printing (check shells, IDE run configs, or `launchctl` if you ever exported it globally).
+3. **Confirm the filter** — From the repo: `bash test.sh` should show non-zero “Ink” and open a preview PNG. If that fails, the problem is local PDF/render, not the printer.
+4. **CUPS errors** — Inspect `/var/log/cups/` or print a job and check Console; the filter logs to stderr when it emits **zero** pages after rendering.
+
 ## How it works (Protocol Technicals)
 During the reverse-engineering process, we discovered the printer accepts a slight variation of the standard ESC/POS protocol (`GS v 0`) wrapped in specific start/end bytes:
 1. **Header**: `STX (0x02)`, `ESC @` (Initialize)

@@ -138,6 +138,7 @@ func main() {
     guard let provider = CGDataProvider(data: pdfData as CFData),
           let pdfDoc = CGPDFDocument(provider) else { exit(1) }
 
+    var pagesEmitted = 0
     for pageNum in 1...pdfDoc.numberOfPages {
         guard let page = pdfDoc.page(at: pageNum) else { continue }
 
@@ -214,14 +215,23 @@ func main() {
         let printableWidth = targetWidth - rightMargin
 
         let contentWidth = croppedImage.height
-        let contentHeight = croppedImage.width
 
         var finalScale = (CGFloat(printableWidth) / CGFloat(contentWidth)) * CGFloat(scaleAdjust)
         if finalScale > maxRenderScale {
             finalScale = maxRenderScale
         }
 
-        let targetHeight = Int(CGFloat(contentHeight) * finalScale) + feedPaddingDots
+        // Scaled size in PDF pixel space (before +90° rotation into the head bitmap).
+        var drawWidth = CGFloat(croppedImage.width) * finalScale
+        var drawHeight = CGFloat(croppedImage.height) * finalScale
+        // After rotation, the span along the 576-dot scan axis must not exceed printable width.
+        if drawHeight > CGFloat(printableWidth) {
+            finalScale *= CGFloat(printableWidth) / drawHeight
+            drawWidth = CGFloat(croppedImage.width) * finalScale
+            drawHeight = CGFloat(croppedImage.height) * finalScale
+        }
+        // Buffer height must cover the rotated AABB; using only width×scale clips tall spans → all-white output.
+        let targetHeight = Int(ceil(max(drawWidth, drawHeight))) + feedPaddingDots + 64
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -240,8 +250,6 @@ func main() {
         finalContext.scaleBy(x: 1.0, y: -1.0)
         finalContext.rotate(by: CGFloat.pi / 2.0)
 
-        let drawWidth = CGFloat(croppedImage.width) * finalScale
-        let drawHeight = CGFloat(croppedImage.height) * finalScale
         finalContext.draw(croppedImage,
                           in: CGRect(x: -drawWidth / 2.0,
                                      y: -drawHeight / 2.0,
@@ -258,6 +266,14 @@ func main() {
 
         if !previewOnly {
             FileHandle.standardOutput.write(escposData)
+            pagesEmitted += 1
+        }
+    }
+
+    if !previewOnly && pagesEmitted == 0 {
+        let msg = "pdftonemonic: wrote 0 pages (empty PDF, render failure, or all pages skipped). Set NEMONIC_DEBUG_DIR to capture PNGs.\n"
+        if let data = msg.data(using: .utf8) {
+            FileHandle.standardError.write(data)
         }
     }
 }
