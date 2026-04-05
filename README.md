@@ -22,7 +22,7 @@ This project completely reverse-engineers the printer's proprietary USB protocol
 
 ## Before you use paper (preflight)
 
-**Never send a job straight to the printer** until a PDF has been checked offline:
+**Check a PDF offline to test for accurate generation**:
 
 ```bash
 bash preflight_pdf.sh --open /path/to/same-file-you-will-print.pdf
@@ -30,7 +30,7 @@ bash preflight_pdf.sh --open /path/to/same-file-you-will-print.pdf
 
 This compiles the filter from the repo, builds the same ESC/POS bytes, counts black dots, and writes **`/tmp/nemonic_preflight.png`**. It **fails** (exit 1) if the stream is tiny or ink is below `MIN_INK_DOTS` (default 500). Open the PNG and press **⌘L** once so it looks like the physical note.
 
-Use the **exact** PDF you will print (e.g. the same file from BBEdit / Print to PDF). No `lp` in this script — only validation.
+You can check the **exact** PDF you will print (e.g. the same file from BBEdit / Print to PDF). No `lp` in this script — only validation.
 
 ## Installation
 
