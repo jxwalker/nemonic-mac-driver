@@ -12,7 +12,8 @@ This project completely reverse-engineers the printer's proprietary USB protocol
 * **Bypasses `cgpdftoraster`**: Directly reads PDF print jobs and natively rasterizes them using Apple's highly-optimized CoreGraphics engine.
 * **Smart Auto-Crop**: Native macOS apps (like Chrome, Word, Typora) often add invisible 1-inch margins to printed pages. On an 80mm sticky note, this squishes your text into a tiny 5mm column! This driver automatically scans the rendered image, crops out the useless white space, and blows up the actual content to perfectly fit the roll.
 * **Hardware Safety Margin**: Automatically buffers your text exactly 36 dots (~4.5mm) away from the adhesive strip so it never overlaps the sticky edge or gets clipped by the hardware lip.
-* **Sideways Feed Correction**: Because the sticky tape runs along the feed roll (the right-hand side), the physical printer is actually 90 degrees sideways compared to a standard POS receipt printer. The driver automatically maps and rotates all print jobs 90 degrees clockwise so your text *always* reads flawlessly top-to-bottom!
+* **Sideways Feed Correction (Sticky mode)**: Because the sticky tape runs along the feed roll (the right-hand side), the physical printer is actually 90 degrees sideways compared to a standard POS receipt printer. In **Sticky** print mode the driver rotates jobs 90° clockwise so text reads correctly on notes with the adhesive edge.
+* **Receipt / Portrait mode**: The same hardware can now also be used for normal receipts, tickets, or logs. Select **Receipt** in the Print Mode option (or use a dedicated queue) and the driver emits upright raster with no extra rotation.
 * **Prints Anything**: Accurately reproduces system fonts, vector graphics, shapes, barcodes, and QR codes natively.
 
 ## Developer documentation

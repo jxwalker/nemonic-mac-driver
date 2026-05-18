@@ -73,6 +73,13 @@
 
 *OpenGroup: General/General
 
+*OpenUI *NemonicMode/Print Mode: PickOne
+*OrderDependency: 10 AnySetup *NemonicMode
+*DefaultNemonicMode: Sticky
+*NemonicMode Sticky/Sticky Notes (rotated 90° for adhesive edge): ""
+*NemonicMode Receipt/Receipts (normal portrait): ""
+*CloseUI: *NemonicMode
+
 *OpenUI *Rotation/Rotate 180 Degree: PickOne
 *OrderDependency: 10 AnySetup *Rotation
 *DefaultRotation: 0No 
@@ -155,5 +162,13 @@
 *ja.Rotation 1Yes/例: "setpagedevice"
 *ja.Translation Cutopt/オートカット（ラベル用紙）: ""
 *ja.Cutopt 0Last/最後のページのみをカットする: "setpagedevice"
+
+*ko.Translation NemonicMode/인쇄 모드: ""
+*ko.NemonicMode Sticky/스티커 메모 (접착제 방향 90° 회전): ""
+*ko.NemonicMode Receipt/영수증 (일반 세로 방향): ""
+
+*ja.Translation NemonicMode/印刷モード: ""
+*ja.NemonicMode Sticky/付箋メモ (接着剤方向90°回転): ""
+*ja.NemonicMode Receipt/レシート (通常の縦向き): ""
 *ja.Cutopt 1Each/すべてのページをカットする: "setpagedevice"
 

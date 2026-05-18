@@ -68,6 +68,23 @@ Do **not** assume “invert Y” fixes crops without re-validating against Lette
 | `NEMONIC_RIGHT_MARGIN` | Dots reserved on the sticky edge (default 12). |
 | `NEMONIC_SCALE_ADJUST` | Multiplier on fitted scale (default 1.0). |
 | `NEMONIC_INTERPOLATION` | When set, controls interpolation when flattening RGB→gray and drawing the cropped image; unset uses high quality for the scaled draw. |
+| `NEMONIC_MODE` | Force mode for testing: `Sticky` (default, 90° rotation) or `Receipt` (normal portrait). Overrides the PPD *NemonicMode* job option. |
+
+### Print Mode (NemonicMode)
+
+The PPD now exposes a **Print Mode** choice (`*NemonicMode`) with two values:
+
+* **Sticky** (default) — the classic behaviour: the filter applies a +90° rotation so text reads correctly on sticky notes where the adhesive runs along one edge. The *rightMargin* safety zone is reserved on the sticky side.
+* **Receipt** — no extra rotation. Content is laid out normally across the 80 mm print head width and flows down the long dimension of the paper. Ideal for receipts, tickets, logs, etc.
+
+The mode is passed to the filter in the CUPS options string and logged at startup (`NemonicMode=...`). You can also force it with the `NEMONIC_MODE` environment variable when running the filter directly or via the preflight harness.
+
+When you have two queues for the same physical printer, set different defaults:
+
+```bash
+lpadmin -p Nemonic_Sticky  -o NemonicMode=Sticky
+lpadmin -p Nemonic_Receipt -o NemonicMode=Receipt
+```
 
 On startup the filter prints **`filterBuildTag`** to **stderr** so `/private/var/log/cups/error_log` proves **which** binary CUPS ran (confirms `sudo ./install.sh` picked up your build).
 

@@ -61,6 +61,7 @@ if [ -n "$URI" ]; then
     echo "Adding printer queue 'Nemonic_MIP_201'..."
     lpadmin -p "Nemonic_MIP_201" -v "$URI" -P "/Library/Printers/PPDs/Contents/Resources/Nemonic_MIP_201.ppd.gz" -E
     lpadmin -p "Nemonic_MIP_201" -o PageSize=80x80mm.Fullbleed
+    lpadmin -p "Nemonic_MIP_201" -o NemonicMode=Sticky
     echo "Printer added successfully! You can now print to 'Nemonic_MIP_201'."
 else
     echo "Printer not found via USB. Please ensure it is plugged in and turned on."

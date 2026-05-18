@@ -21,9 +21,9 @@ func loadJobPDF(arguments args: [String]) -> Data? {
 }
 
 let maxRenderScale: CGFloat = 2.0
-let feedPaddingDots = 60
+let feedPaddingDots = 4
 /// Logged once per job to /private/var/log/cups/error_log (confirms install is current).
-private let filterBuildTag = "pdftonemonic build 2026-04-04-crop-bottom-origin"
+private let filterBuildTag = "pdftonemonic build 2026-05-18-dual-mode-sticky-receipt"
 
 func debugDirectoryURL() -> URL? {
     guard let path = ProcessInfo.processInfo.environment["NEMONIC_DEBUG_DIR"],
@@ -41,6 +41,31 @@ func debugDirectoryURL() -> URL? {
 func shouldPreviewOnly() -> Bool {
     let value = ProcessInfo.processInfo.environment["NEMONIC_PREVIEW_ONLY"]?.lowercased()
     return value == "1" || value == "true" || value == "yes"
+}
+
+func resolveNemonicMode(rawOptions: String) -> String {
+    // Allow env override for testing (NEMONIC_MODE=Receipt or Sticky)
+    if let env = ProcessInfo.processInfo.environment["NEMONIC_MODE"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !env.isEmpty {
+        let v = env.capitalized
+        if v == "Receipt" || v == "Sticky" {
+            return v
+        }
+    }
+    // CUPS options string: "PageSize=... NemonicMode=Receipt ColorModel=Gray ..."
+    for token in rawOptions.split(separator: " ") {
+        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("NemonicMode=") {
+            var v = String(t.dropFirst("NemonicMode=".count))
+            if (v.hasPrefix("\"") && v.hasSuffix("\"")) || (v.hasPrefix("'") && v.hasSuffix("'")) {
+                v = String(v.dropFirst().dropLast())
+            }
+            if v == "Receipt" || v == "Sticky" {
+                return v
+            }
+        }
+    }
+    return "Sticky"
 }
 
 func envInt(_ name: String, default defaultValue: Int) -> Int {
@@ -160,6 +185,12 @@ func main() {
     let rightMargin = max(0, envInt("NEMONIC_RIGHT_MARGIN", default: 12))
     let interpolationQuality = ProcessInfo.processInfo.environment["NEMONIC_INTERPOLATION"] == nil ? .high : envInterpolationQuality()
     let scaleAdjust = max(0.25, envDouble("NEMONIC_SCALE_ADJUST", default: 1.0))
+
+    let rawOptions = (args.count >= 6) ? args[5] : ""
+    let nemonicMode = resolveNemonicMode(rawOptions: rawOptions)
+    let isStickyMode = (nemonicMode != "Receipt")
+    fputs("pdftonemonic: NemonicMode=\(nemonicMode) (isSticky=\(isStickyMode))\n", stderr)
+
     guard let pdfData = loadJobPDF(arguments: args), !pdfData.isEmpty else {
         fputs("pdftonemonic: no PDF bytes (if running by hand with a file path, use: ... < /dev/null or pass a valid argv[6]).\n", stderr)
         exit(1)
@@ -266,24 +297,31 @@ func main() {
         saveDebugImage(croppedImage, pageNum: pageNum, stage: "cropped", directory: debugDir)
 
         let targetWidth = 576
-        let printableWidth = targetWidth - rightMargin
+        let sideMarginDots = isStickyMode ? rightMargin : 8
+        let printableWidth = targetWidth - sideMarginDots
 
-        let contentWidth = croppedImage.height
+        // Sticky: after +90° rotation we fit the *height* of the cropped content across the printable width.
+        // Receipt: we fit the *width* of the cropped content across the printable width (normal orientation).
+        let contentDimForFit = isStickyMode ? croppedImage.height : croppedImage.width
 
-        var finalScale = (CGFloat(printableWidth) / CGFloat(contentWidth)) * CGFloat(scaleAdjust)
+        var finalScale = (CGFloat(printableWidth) / CGFloat(contentDimForFit)) * CGFloat(scaleAdjust)
         if finalScale > maxRenderScale {
             finalScale = maxRenderScale
         }
 
         var drawWidth = CGFloat(croppedImage.width) * finalScale
         var drawHeight = CGFloat(croppedImage.height) * finalScale
-        if drawHeight > CGFloat(printableWidth) {
+        if isStickyMode && drawHeight > CGFloat(printableWidth) {
+            // Only needed in sticky mode: after rotation both dimensions must fit the tall output bitmap.
             finalScale *= CGFloat(printableWidth) / drawHeight
             drawWidth = CGFloat(croppedImage.width) * finalScale
             drawHeight = CGFloat(croppedImage.height) * finalScale
         }
-        // After +90° rotation the bitmap must fit max(scaled W,H); too-short height clips all ink → blank.
-        let targetHeight = Int(ceil(max(drawWidth, drawHeight))) + feedPaddingDots + 64
+
+        let extra = isStickyMode ? feedPaddingDots : (feedPaddingDots + 64)
+        let targetHeight = isStickyMode
+            ? Int(ceil(max(drawWidth, drawHeight))) + extra
+            : Int(ceil(drawHeight)) + extra
 
         var finalData = [UInt8](repeating: 255, count: targetWidth * targetHeight)
         guard let finalContext = CGContext(data: &finalData,
@@ -298,18 +336,68 @@ func main() {
         finalContext.fill(CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
         finalContext.interpolationQuality = interpolationQuality
 
-        finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: CGFloat(targetHeight) / 2.0)
-        finalContext.scaleBy(x: 1.0, y: -1.0)
-        finalContext.rotate(by: CGFloat.pi / 2.0)
+        if isStickyMode {
+            // Original sticky-note path: +90° rotation so text reads correctly with adhesive on the side.
+            // Biased toward north (leading edge) — small padding on north, extra white on south.
+            let northPadding: CGFloat = 4
+            finalContext.translateBy(x: CGFloat(printableWidth) / 2.0, y: northPadding + drawHeight / 2.0)
+            finalContext.scaleBy(x: 1.0, y: -1.0)
+            finalContext.rotate(by: CGFloat.pi / 2.0)
 
-        finalContext.draw(croppedImage,
-                          in: CGRect(x: -drawWidth / 2.0,
-                                     y: -drawHeight / 2.0,
-                                     width: drawWidth,
-                                     height: drawHeight))
+            finalContext.draw(croppedImage,
+                              in: CGRect(x: -drawWidth / 2.0,
+                                         y: -drawHeight / 2.0,
+                                         width: drawWidth,
+                                         height: drawHeight))
+        } else {
+            // Receipt path: normal upright orientation, content flows down the paper length.
+            // Set up context so y=0 is the leading edge and Y increases toward the trailing edge.
+            finalContext.translateBy(x: 0, y: CGFloat(targetHeight))
+            finalContext.scaleBy(x: 1.0, y: -1.0)
+
+            let leftMargin = CGFloat(sideMarginDots) / 2.0
+            let topPadding = CGFloat(feedPaddingDots)
+
+            // 180° in the paper-down system — this version gives correct left-to-right.
+            finalContext.saveGState()
+            finalContext.translateBy(x: leftMargin + drawWidth, y: topPadding + drawHeight)
+            finalContext.scaleBy(x: -1.0, y: -1.0)
+            finalContext.draw(croppedImage,
+                              in: CGRect(x: 0, y: 0, width: drawWidth, height: drawHeight))
+            finalContext.restoreGState()
+        }
 
         guard let finalImage = finalContext.makeImage() else { continue }
         saveDebugImage(finalImage, pageNum: pageNum, stage: "final-raster", directory: debugDir)
+
+        // Receipt correction: force correct orientation on paper (top of content
+        // at leading edge, left-to-right reading) regardless of drawing math.
+        if !isStickyMode {
+            // Vertical flip (reverse row order)
+            for i in 0..<(targetHeight / 2) {
+                let j = targetHeight - 1 - i
+                for x in 0..<targetWidth {
+                    let a = i * targetWidth + x
+                    let b = j * targetWidth + x
+                    let tmp = finalData[a]
+                    finalData[a] = finalData[b]
+                    finalData[b] = tmp
+                }
+            }
+            // Horizontal flip (reverse each row left-to-right)
+            for y in 0..<targetHeight {
+                var left = y * targetWidth
+                var right = left + targetWidth - 1
+                while left < right {
+                    let tmp = finalData[left]
+                    finalData[left] = finalData[right]
+                    finalData[right] = tmp
+                    left += 1
+                    right -= 1
+                }
+            }
+        }
+
 
         let (escposData, monoData) = ditherAndPrint(rawData: finalData, width: targetWidth, height: targetHeight)
         if let monoImage = makeImage(from: monoData, width: targetWidth, height: targetHeight) {
