@@ -171,4 +171,3 @@
 *ja.NemonicMode Sticky/付箋メモ (接着剤方向90°回転): ""
 *ja.NemonicMode Receipt/レシート (通常の縦向き): ""
 *ja.Cutopt 1Each/すべてのページをカットする: "setpagedevice"
-

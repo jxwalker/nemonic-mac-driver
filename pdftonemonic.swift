@@ -23,7 +23,7 @@ func loadJobPDF(arguments args: [String]) -> Data? {
 let maxRenderScale: CGFloat = 2.0
 let feedPaddingDots = 4
 /// Logged once per job to /private/var/log/cups/error_log (confirms install is current).
-private let filterBuildTag = "pdftonemonic build 2026-05-18-dual-mode-sticky-receipt"
+private let filterBuildTag = "pdftonemonic build 2026-05-22-receipt-default-none"
 
 func debugDirectoryURL() -> URL? {
     guard let path = ProcessInfo.processInfo.environment["NEMONIC_DEBUG_DIR"],
@@ -66,6 +66,31 @@ func resolveNemonicMode(rawOptions: String) -> String {
         }
     }
     return "Sticky"
+}
+
+func resolveReceiptTransform(rawOptions: String) -> String {
+    if let env = ProcessInfo.processInfo.environment["NEMONIC_RECEIPT_TRANSFORM"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+       !env.isEmpty {
+        let v = env.capitalized
+        if ["None", "Flipy", "Flipx", "Rotate180"].contains(v) {
+            return v == "Flipy" ? "FlipY" : (v == "Flipx" ? "FlipX" : v)
+        }
+    }
+
+    for token in rawOptions.split(separator: " ") {
+        let t = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.hasPrefix("NemonicReceiptTransform=") {
+            var v = String(t.dropFirst("NemonicReceiptTransform=".count))
+            if (v.hasPrefix("\"") && v.hasSuffix("\"")) || (v.hasPrefix("'") && v.hasSuffix("'")) {
+                v = String(v.dropFirst().dropLast())
+            }
+            if ["None", "FlipY", "FlipX", "Rotate180"].contains(v) {
+                return v
+            }
+        }
+    }
+
+    return "None"
 }
 
 func envInt(_ name: String, default defaultValue: Int) -> Int {
@@ -128,6 +153,50 @@ func makeImage(from rawData: [UInt8], width: Int, height: Int) -> CGImage? {
                    intent: .defaultIntent)
 }
 
+func cropRectForInk(rawData: [UInt8],
+                    width: Int,
+                    height: Int,
+                    padding: Int,
+                    preserveFullWidth: Bool) -> CGRect {
+    var minX = width
+    var maxX = 0
+    var minY = height
+    var maxY = 0
+
+    for y in 0..<height {
+        for x in 0..<width {
+            if rawData[y * width + x] < 250 {
+                if x < minX { minX = x }
+                if x > maxX { maxX = x }
+                if y < minY { minY = y }
+                if y > maxY { maxY = y }
+            }
+        }
+    }
+
+    guard minX <= maxX && minY <= maxY else {
+        return CGRect(x: 0, y: 0, width: width, height: height)
+    }
+
+    minY = max(0, minY - padding)
+    maxY = min(height - 1, maxY + padding)
+
+    if preserveFullWidth {
+        minX = 0
+        maxX = width - 1
+    } else {
+        minX = max(0, minX - padding)
+        maxX = min(width - 1, maxX + padding)
+    }
+
+    // CGImage.cropping uses Quartz coords. With the bitmap context used here,
+    // the scanned row indexes are already in the same bottom-origin space.
+    return CGRect(x: minX,
+                  y: minY,
+                  width: maxX - minX + 1,
+                  height: maxY - minY + 1)
+}
+
 func ditherThreshold() -> Int {
     let t = envInt("NEMONIC_THRESHOLD", default: 160)
     if (1...255).contains(t) { return t }
@@ -188,8 +257,47 @@ func main() {
 
     let rawOptions = (args.count >= 6) ? args[5] : ""
     let nemonicMode = resolveNemonicMode(rawOptions: rawOptions)
-    let isStickyMode = (nemonicMode != "Receipt")
-    fputs("pdftonemonic: NemonicMode=\(nemonicMode) (isSticky=\(isStickyMode))\n", stderr)
+    let receiptTransform = resolveReceiptTransform(rawOptions: rawOptions)
+
+    // === HARD OVERRIDE FOR THE DEDICATED RECEIPT QUEUE ===
+    // Some versions of Word + CUPS + our custom PPD option leave the queue
+    // in a broken state (NemonicMode?=true). This early check looks at the
+    // actual queue the job was sent to (argv[0]) and forces the receipt path
+    // no matter what the options or PRINTER env say.
+    let destination = (args.count > 0 ? args[0] : "").lowercased()
+    var hardForcedReceipt = false
+    if destination.contains("receipt") || destination.contains("nemonic_receipt") {
+        hardForcedReceipt = true
+    }
+
+    // Mode must be explicit and stable. Sticky rotates for notes; Receipt stays upright.
+    // Queue names are a strong fallback because some GUI apps do not reliably preserve
+    // custom PPD options in the CUPS options string.
+    var isStickyMode = false
+
+    if nemonicMode == "Sticky" || rawOptions.lowercased().contains("sticky") {
+        isStickyMode = true
+    }
+
+    // Check multiple sources for the destination queue name.
+    // args[0] is the most reliable (what CUPS actually invoked the filter for).
+    let dest = (args.count > 0 ? args[0] : "").lowercased()
+    let printerName = ProcessInfo.processInfo.environment["PRINTER"]?.lowercased() ?? ""
+    if dest.contains("sticky") || printerName.contains("sticky") {
+        isStickyMode = true
+    }
+    if dest.contains("receipt") || printerName.contains("receipt") || rawOptions.lowercased().contains("receipt") || rawOptions.lowercased().contains("nemonic_receipt") {
+        isStickyMode = false
+    }
+
+    if hardForcedReceipt {
+        isStickyMode = false
+        fputs("pdftonemonic: HARD FORCED RECEIPT MODE (destination queue name contains receipt)\n", stderr)
+    }
+
+    let cupsPrinter = ProcessInfo.processInfo.environment["CUPS_PRINTER"] ?? ""
+    fputs("pdftonemonic: NemonicMode=\(nemonicMode) (isSticky=\(isStickyMode)) ReceiptTransform=\(receiptTransform) PRINTER=\(printerName) CUPS_PRINTER=\(cupsPrinter)\n", stderr)
+    fputs("pdftonemonic: rawOptions=\(rawOptions)\n", stderr)
 
     guard let pdfData = loadJobPDF(arguments: args), !pdfData.isEmpty else {
         fputs("pdftonemonic: no PDF bytes (if running by hand with a file path, use: ... < /dev/null or pass a valid argv[6]).\n", stderr)
@@ -217,6 +325,8 @@ func main() {
 
         let pdfWidth = isRotated ? box.height : box.width
         let pdfHeight = isRotated ? box.width : box.height
+
+        fputs("pdftonemonic: pageBox width=\(pdfWidth) height=\(pdfHeight) pts (after rotation handling)\n", stderr)
 
         let dpiScale: CGFloat = 203.0 / 72.0
         let testWidth = Int(pdfWidth * dpiScale)
@@ -263,35 +373,11 @@ func main() {
         saveDebugImage(rgbImage, pageNum: pageNum, stage: "rendered-rgb", directory: debugDir)
         saveDebugImage(testImage, pageNum: pageNum, stage: "rendered", directory: debugDir)
 
-        var minX = testWidth
-        var maxX = 0
-        var minY = testHeight
-        var maxY = 0
-        for y in 0..<testHeight {
-            for x in 0..<testWidth {
-                if testData[y * testWidth + x] < 250 {
-                    if x < minX { minX = x }
-                    if x > maxX { maxX = x }
-                    if y < minY { minY = y }
-                    if y > maxY { maxY = y }
-                }
-            }
-        }
-
-        var cropRect = CGRect(x: 0, y: 0, width: testWidth, height: testHeight)
-        if minX <= maxX && minY <= maxY {
-            let padding = cropPadding
-            minX = max(0, minX - padding)
-            minY = max(0, minY - padding)
-            maxX = min(testWidth - 1, maxX + padding)
-            maxY = min(testHeight - 1, maxY + padding)
-
-            // CGImage.cropping uses Quartz coords: origin bottom-left; buffer row 0 is y=0.
-            cropRect = CGRect(x: minX,
-                              y: minY,
-                              width: maxX - minX + 1,
-                              height: maxY - minY + 1)
-        }
+        let cropRect = cropRectForInk(rawData: testData,
+                                      width: testWidth,
+                                      height: testHeight,
+                                      padding: cropPadding,
+                                      preserveFullWidth: !isStickyMode)
 
         guard let croppedImage = testImage.cropping(to: cropRect) else { continue }
         saveDebugImage(croppedImage, pageNum: pageNum, stage: "cropped", directory: debugDir)
@@ -350,54 +436,59 @@ func main() {
                                          width: drawWidth,
                                          height: drawHeight))
         } else {
-            // Receipt path: normal upright orientation, content flows down the paper length.
-            // Set up context so y=0 is the leading edge and Y increases toward the trailing edge.
+            // Receipt path: no rotation, no tight horizontal crop.
+            // Word is especially sensitive here: tight crop + fit-to-width turns ordinary body
+            // text into giant text. Preserve the PDF page width and only trim vertical whitespace.
             finalContext.translateBy(x: 0, y: CGFloat(targetHeight))
             finalContext.scaleBy(x: 1.0, y: -1.0)
 
             let leftMargin = CGFloat(sideMarginDots) / 2.0
             let topPadding = CGFloat(feedPaddingDots)
 
-            // 180° in the paper-down system — this version gives correct left-to-right.
-            finalContext.saveGState()
-            finalContext.translateBy(x: leftMargin + drawWidth, y: topPadding + drawHeight)
-            finalContext.scaleBy(x: -1.0, y: -1.0)
             finalContext.draw(croppedImage,
-                              in: CGRect(x: 0, y: 0, width: drawWidth, height: drawHeight))
-            finalContext.restoreGState()
+                              in: CGRect(x: leftMargin,
+                                         y: topPadding,
+                                         width: drawWidth,
+                                         height: drawHeight))
+        }
+
+        if !isStickyMode {
+            switch receiptTransform {
+            case "None":
+                break
+            case "FlipX":
+                for y in 0..<targetHeight {
+                    for x in 0..<(targetWidth / 2) {
+                        let a = y * targetWidth + x
+                        let b = y * targetWidth + (targetWidth - 1 - x)
+                        let tmp = finalData[a]
+                        finalData[a] = finalData[b]
+                        finalData[b] = tmp
+                    }
+                }
+            case "Rotate180":
+                for i in 0..<(finalData.count / 2) {
+                    let j = finalData.count - 1 - i
+                    let tmp = finalData[i]
+                    finalData[i] = finalData[j]
+                    finalData[j] = tmp
+                }
+            default:
+                for i in 0..<(targetHeight / 2) {
+                    let j = targetHeight - 1 - i
+                    for x in 0..<targetWidth {
+                        let a = i * targetWidth + x
+                        let b = j * targetWidth + x
+                        let tmp = finalData[a]
+                        finalData[a] = finalData[b]
+                        finalData[b] = tmp
+                    }
+                }
+            }
         }
 
         guard let finalImage = finalContext.makeImage() else { continue }
         saveDebugImage(finalImage, pageNum: pageNum, stage: "final-raster", directory: debugDir)
-
-        // Receipt correction: force correct orientation on paper (top of content
-        // at leading edge, left-to-right reading) regardless of drawing math.
-        if !isStickyMode {
-            // Vertical flip (reverse row order)
-            for i in 0..<(targetHeight / 2) {
-                let j = targetHeight - 1 - i
-                for x in 0..<targetWidth {
-                    let a = i * targetWidth + x
-                    let b = j * targetWidth + x
-                    let tmp = finalData[a]
-                    finalData[a] = finalData[b]
-                    finalData[b] = tmp
-                }
-            }
-            // Horizontal flip (reverse each row left-to-right)
-            for y in 0..<targetHeight {
-                var left = y * targetWidth
-                var right = left + targetWidth - 1
-                while left < right {
-                    let tmp = finalData[left]
-                    finalData[left] = finalData[right]
-                    finalData[right] = tmp
-                    left += 1
-                    right -= 1
-                }
-            }
-        }
-
 
         let (escposData, monoData) = ditherAndPrint(rawData: finalData, width: targetWidth, height: targetHeight)
         if let monoImage = makeImage(from: monoData, width: targetWidth, height: targetHeight) {

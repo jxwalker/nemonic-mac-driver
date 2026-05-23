@@ -16,6 +16,28 @@ This project completely reverse-engineers the printer's proprietary USB protocol
 * **Receipt / Portrait mode**: The same hardware can now also be used for normal receipts, tickets, or logs. Select **Receipt** in the Print Mode option (or use a dedicated queue) and the driver emits upright raster with no extra rotation.
 * **Prints Anything**: Accurately reproduces system fonts, vector graphics, shapes, barcodes, and QR codes natively.
 
+## Word printing
+
+For Microsoft Word, use the dedicated queues created by:
+
+```bash
+sudo ./setup_custom_queues.sh
+```
+
+Use **`Nemonic_Sticky`** for post-it notes and **`Nemonic_Receipt`** for upright receipts. In Word, select the printer queue before setting the page size so Word loads the queue-specific media list.
+
+Recommended Word settings:
+
+* **Sticky notes**: `Nemonic_Sticky`, `80x80mm.Fullbleed`.
+* **Receipts**: `Nemonic_Receipt`, `80x136mm.Fullbleed`.
+* Use actual size / 100% scaling for the first test print.
+* Avoid fit-to-page until the controlled shell and Word baselines are known-good.
+
+Confirmed baseline:
+
+* Shell sticky, shell receipt, and Word receipt test prints are correct with installed build `pdftonemonic build 2026-05-22-receipt-default-none`.
+* The correct receipt physical transform is no additional transform (`None`): the driver preserves Word/PDF orientation and lets the printer consume rows in the normal order.
+
 ## Developer documentation
 
 * **[docs/technical/developer-guide.md](docs/technical/developer-guide.md)** — CUPS argv/stdin, RGB→gray raster, **correct auto-crop math** (Letter + BBEdit), env vars, and debugging **`error_log`**.
